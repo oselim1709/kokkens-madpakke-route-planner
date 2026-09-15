@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta charset="UTF-8" />
+<style>
+  @page {
+    size: A4;
+    margin: 0;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 210mm;
+    height: 297mm;
+  }
+  body {
+    font-family: 'PT Serif', serif;
+    background: #faf7ef;
+    color: #12241c;
+  }
+
+  .frame {
+    margin: 0;
+    padding: 8mm 0 6mm 0;
+    box-sizing: border-box;
+  }
+
+  .top-rule {
+    width: 40mm;
+    height: 2px;
+    background: #a8781f;
+    margin: 0 auto 5mm auto;
+  }
+
+  .logo-wrap {
+    text-align: center;
+  }
+  .logo-wrap img {
+    width: 42mm;
+    height: 42mm;
+    border-radius: 50%;
+    border: 3px solid #a8781f;
+  }
+
+  .brand {
+    text-align: center;
+    font-size: 14pt;
+    letter-spacing: 5px;
+    color: #a8781f;
+    text-transform: uppercase;
+    margin-top: 4mm;
+    font-weight: bold;
+  }
+
+  .location {
+    text-align: center;
+    font-family: 'Arimo', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    font-size: 12pt;
+    color: #12241c;
+    margin-top: 2.5mm;
+    font-weight: bold;
+  }
+
+  .divider {
+    width: 26mm;
+    height: 2px;
+    background: #a8781f;
+    margin: 4mm auto;
+  }
+
+  .menu {
+    padding: 0 20mm;
+  }
+
+  .item {
+    margin-bottom: 5.5mm;
+  }
+  .item-head {
+    display: table;
+    width: 100%;
+  }
+  .item-name-cell {
+    display: table-cell;
+    vertical-align: baseline;
+  }
+  .item-price-cell {
+    display: table-cell;
+    vertical-align: baseline;
+    text-align: right;
+    white-space: nowrap;
+    padding-left: 6mm;
+    width: 1%;
+  }
+  .item-name {
+    font-size: 17pt;
+    font-weight: bold;
+    letter-spacing: 0.2px;
+    color: #12241c;
+  }
+  .item-sub {
+    font-size: 11pt;
+    font-style: italic;
+    color: #3d4f45;
+    display: block;
+    margin-top: 0.5mm;
+  }
+  .item-price {
+    font-family: 'Arimo', sans-serif;
+    color: #8a5f14;
+    font-weight: bold;
+    font-size: 15pt;
+  }
+  .item-desc {
+    font-size: 11pt;
+    line-height: 1.32;
+    color: #12241c;
+    margin-top: 2mm;
+  }
+  .item-meta {
+    font-family: 'Arimo', sans-serif;
+    font-size: 10pt;
+    letter-spacing: 0.3px;
+    color: #33463c;
+    margin-top: 2mm;
+    font-weight: bold;
+  }
+  .item-allergen {
+    font-family: 'Arimo', sans-serif;
+    font-size: 10pt;
+    color: #8a5f14;
+    margin-top: 1mm;
+    font-weight: bold;
+  }
+
+  .pay-section {
+    margin: 4mm 20mm 0 20mm;
+    border-top: 2px solid #a8781f;
+    padding-top: 4mm;
+    text-align: center;
+  }
+  .pay-title {
+    font-family: 'Arimo', sans-serif;
+    font-size: 13pt;
+    letter-spacing: 2.5px;
+    color: #12241c;
+    text-transform: uppercase;
+    margin-bottom: 3.5mm;
+    font-weight: bold;
+  }
+  .pay-box {
+    background: #ffffff;
+    border: 2px solid #12241c;
+    border-radius: 6mm;
+    padding: 5mm 6mm;
+    margin: 0 4mm;
+  }
+  .pay-badge img {
+    display: block;
+    height: 14mm;
+    width: auto;
+    margin: 0 auto;
+  }
+  .pay-number {
+    font-family: 'Arimo', sans-serif;
+    font-size: 38pt;
+    font-weight: bold;
+    letter-spacing: 2px;
+    color: #12241c;
+    margin-top: 3mm;
+    line-height: 1;
+  }
+  .pay-note {
+    font-family: 'Arimo', sans-serif;
+    font-size: 10pt;
+    color: #12241c;
+    margin-top: 3.5mm;
+    letter-spacing: 0.3px;
+    font-weight: bold;
+  }
+
+  .bottom-rule {
+    width: 40mm;
+    height: 2px;
+    background: #a8781f;
+    margin: 5mm auto 0 auto;
+  }
+</style>
+</head>
+<body>
+<div class="frame">
+
+  <div class="top-rule"></div>
+
+  <div class="logo-wrap"><img src="{{LOGO_SRC}}" /></div>
+  <div class="brand">Kokkens Madpakke</div>
+  <div class="location">{{LOCATION}}</div>
+  <div class="divider"></div>
+
+  <div class="menu">
+    <div class="item">
+      <div class="item-head">
+        <div class="item-name-cell">
+          <span class="item-name">{{DISH_NAME}}<span class="item-sub">{{DISH_SUBTITLE}}</span></span>
+        </div>
+        <div class="item-price-cell"><span class="item-price">{{DISH_PRICE}} kr</span></div>
+      </div>
+      {{DISH_DESC_LINE}}
+      {{DISH_META_LINE}}
+      {{DISH_ALLERGEN_LINE}}
+    </div>
+
+    <div class="item">
+      <div class="item-head">
+        <div class="item-name-cell">
+          <span class="item-name">Protein Risengrød<span class="item-sub">Med kanel &amp; smør</span></span>
+        </div>
+        <div class="item-price-cell"><span class="item-price">59 kr</span></div>
+      </div>
+      <div class="item-allergen">Allergener: mælk</div>
+    </div>
+
+    <div class="item">
+      <div class="item-head">
+        <div class="item-name-cell"><span class="item-name">Protein Myslibar</span></div>
+        <div class="item-price-cell"><span class="item-price">29 kr</span></div>
+      </div>
+      <div class="item-allergen">Allergener: peanuts, pistacienød, mandel, valle</div>
+    </div>
+  </div>
+
+  <div class="pay-section">
+    <div class="pay-title">Betal her før du tager</div>
+    <div class="pay-box">
+      <div class="pay-badge"><img src="{{MOBILEPAY_LOGO_SRC}}" /></div>
+      <div class="pay-number">{{MOBILEPAY_NUMBER}}</div>
+    </div>
+    <div class="pay-note">Ingen kontant betaling &#160;&#183;&#160; kun MobilePay til nummeret ovenfor</div>
+  </div>
+
+  <div class="bottom-rule"></div>
+
+</div>
+</body>
+</html>

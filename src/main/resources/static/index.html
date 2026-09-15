@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="da">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Kokkens Madpakke Route Planner</title>
+<link rel="stylesheet" href="style.css?v=10">
+</head>
+<body>
+
+<header>
+    <h1>🥪 Kokkens Madpakke Route Planner</h1>
+    <p>Stops, chauffører og daglige ruter</p>
+</header>
+
+<main>
+
+    <!-- STOPS TAB -->
+    <section class="tab active" id="tab-stops">
+        <div class="section-title">
+            <h2>Skabeloner</h2>
+            <button class="btn small secondary" id="btn-save-template">💾 Gem som skabelon</button>
+        </div>
+        <form class="card" id="save-template-form" hidden>
+            <label for="template-name-input">Navn på skabelon</label>
+            <div class="driver-row" style="margin-top:6px;">
+                <input type="text" id="template-name-input" placeholder="F.eks. Tirsdag, Standardliste...">
+                <button type="submit" class="btn small">Gem</button>
+                <button type="button" class="btn small ghost" id="btn-save-template-cancel">Annuller</button>
+            </div>
+            <p class="muted" style="margin-top:8px;">Gemmer alle nuværende <strong>aktive</strong> stops (med mængder, type og evt. foretrukken chauffør) som en skabelon, du kan bruge igen.</p>
+        </form>
+        <div id="template-list"></div>
+
+        <div class="section-title">
+            <h2>Stops</h2>
+            <button class="btn small" id="btn-add-stop">+ Tilføj stop</button>
+        </div>
+        <div id="stop-list"></div>
+    </section>
+
+    <!-- ROUTES TAB -->
+    <section class="tab" id="tab-routes">
+        <div class="section-title">
+            <h2>Ruter i dag</h2>
+            <button class="btn small" id="btn-generate">Generér ruter</button>
+        </div>
+        <div id="route-warnings"></div>
+        <div id="route-list"></div>
+    </section>
+
+    <!-- DRIVERS TAB -->
+    <section class="tab" id="tab-drivers">
+        <div class="section-title">
+            <h2>Chauffører</h2>
+        </div>
+        <div class="card">
+            <div class="driver-row">
+                <input type="text" id="new-driver-name" placeholder="Navn på chauffør">
+                <button class="btn small" id="btn-add-driver">Tilføj</button>
+            </div>
+        </div>
+        <div id="driver-list"></div>
+    </section>
+
+    <!-- MENU TAB -->
+    <section class="tab" id="tab-menu">
+        <div class="section-title">
+            <h2>Ugens ret</h2>
+        </div>
+        <div class="card">
+            <form class="stop-form" id="dish-form">
+                <div>
+                    <label for="dish-name">Navn</label>
+                    <input type="text" id="dish-name" required>
+                </div>
+                <div>
+                    <label for="dish-subtitle">Undertitel</label>
+                    <input type="text" id="dish-subtitle">
+                </div>
+                <div>
+                    <label for="dish-description">Beskrivelse</label>
+                    <textarea id="dish-description" rows="3"></textarea>
+                </div>
+                <div class="qty-grid">
+                    <div>
+                        <label for="dish-price">Pris (kr)</label>
+                        <input type="text" id="dish-price" inputmode="numeric">
+                    </div>
+                    <div>
+                        <label for="dish-protein">Protein (g)</label>
+                        <input type="text" id="dish-protein" inputmode="decimal">
+                    </div>
+                    <div>
+                        <label for="dish-kcal">Kcal</label>
+                        <input type="text" id="dish-kcal" inputmode="numeric">
+                    </div>
+                    <div>
+                        <label for="dish-allergens">Allergener (kommasepareret)</label>
+                        <input type="text" id="dish-allergens" placeholder="gluten, laktose...">
+                    </div>
+                </div>
+                <div class="actions">
+                    <button type="submit" class="btn full">Gem ret</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="section-title">
+            <h2>Menukort til print</h2>
+        </div>
+        <div id="menu-location-list"></div>
+        <div class="card">
+            <div class="driver-row">
+                <input type="text" id="new-location-name" placeholder="Navn på lokation">
+                <input type="text" id="new-location-mobilepay" placeholder="MobilePay-nr" style="max-width:140px;">
+                <button class="btn small" id="btn-add-location">Tilføj</button>
+            </div>
+            <div class="actions">
+                <a class="btn small secondary" href="/api/menu/pdf/all.zip">Download alle som ZIP</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- SETTINGS TAB -->
+    <section class="tab" id="tab-settings">
+        <div class="section-title">
+            <h2>Indstillinger</h2>
+        </div>
+        <div class="card">
+            <label class="muted" for="depot-address">Firmaets startadresse (kun afgang — ruterne slutter ved sidste stop, ikke retur)</label>
+            <div class="address-field" style="margin-top:6px;">
+                <input type="text" id="depot-address" placeholder="Begynd at skrive adressen..." autocomplete="off">
+                <div class="address-suggestions" id="depot-address-suggestions" hidden></div>
+            </div>
+            <div class="actions">
+                <button class="btn small" id="btn-save-depot">Gem</button>
+            </div>
+            <p class="muted" id="depot-status"></p>
+        </div>
+        <div class="card">
+            <p class="muted" id="geocode-status">Geokodning: —</p>
+            <p class="muted">Google Maps-nøgle sættes via miljøvariablen <code>GOOGLE_MAPS_API_KEY</code> (valgfrit). Uden nøgle bruges gratis OpenStreetMap/Nominatim automatisk.</p>
+        </div>
+        <div class="card">
+            <h3 style="color:var(--danger);">Nulstil alt</h3>
+            <p class="muted">Sletter ALLE stops og ALLE ruter permanent. Brug det til at starte helt forfra. Kan ikke fortrydes.</p>
+            <button class="btn danger full" id="btn-reset-all">Nulstil alle stop og ruter</button>
+        </div>
+    </section>
+
+</main>
+
+<nav class="tabs">
+    <button class="tab-btn active" data-tab="tab-stops">📋 Stops</button>
+    <button class="tab-btn" data-tab="tab-routes">🗺️ Ruter</button>
+    <button class="tab-btn" data-tab="tab-drivers">🚐 Chauffører</button>
+    <button class="tab-btn" data-tab="tab-menu">🍽️ Menu</button>
+    <button class="tab-btn" data-tab="tab-settings">⚙️ Indstillinger</button>
+</nav>
+
+<div class="toast" id="toast"></div>
+
+<!-- STOP FORM MODAL -->
+<div class="modal-backdrop" id="stop-modal" hidden>
+    <div class="modal">
+        <button class="close-x" id="btn-close-modal">&times;</button>
+        <h2 id="stop-modal-title">Nyt stop</h2>
+        <form class="stop-form" id="stop-form">
+            <input type="hidden" id="stop-id">
+
+            <div>
+                <label for="stop-customer">Kundenavn</label>
+                <input type="text" id="stop-customer" required>
+            </div>
+
+            <div class="address-field">
+                <label for="stop-address">Adresse</label>
+                <input type="text" id="stop-address" required placeholder="Begynd at skrive adressen..." autocomplete="off">
+                <div class="address-suggestions" id="stop-address-suggestions" hidden></div>
+                <div class="address-status" id="stop-address-status"></div>
+            </div>
+
+            <div>
+                <label>Type</label>
+                <div class="type-toggle">
+                    <label><input type="radio" name="stop-type" value="GYM"><span>Gym (~10 min)</span></label>
+                    <label><input type="radio" name="stop-type" value="PRIVATE" checked><span>Privat (~2-5 min)</span></label>
+                </div>
+            </div>
+
+            <div>
+                <label for="stop-deadline">Deadline (valgfri)</label>
+                <input type="time" id="stop-deadline">
+            </div>
+
+            <div>
+                <label for="stop-driver">Foretrukken chauffør (valgfri)</label>
+                <select id="stop-driver">
+                    <option value="">Automatisk (fordeles ved generering)</option>
+                </select>
+            </div>
+
+            <div>
+                <label>Varer</label>
+                <div class="qty-grid">
+                    <div>
+                        <label for="qty-normal">Normal madpakke</label>
+                        <input type="number" min="0" id="qty-normal" value="0">
+                    </div>
+                    <div>
+                        <label for="qty-fitness">Fitness madpakke</label>
+                        <input type="number" min="0" id="qty-fitness" value="0">
+                    </div>
+                    <div>
+                        <label for="qty-musli">Müslibar</label>
+                        <input type="number" min="0" id="qty-musli" value="0">
+                    </div>
+                    <div>
+                        <label for="qty-fruit">Frugt</label>
+                        <input type="number" min="0" id="qty-fruit" value="0">
+                    </div>
+                    <div>
+                        <label for="qty-risengroed">Risengrød</label>
+                        <input type="number" min="0" id="qty-risengroed" value="0">
+                    </div>
+                    <div>
+                        <label for="qty-sandwich">Sandwich</label>
+                        <input type="number" min="0" id="qty-sandwich" value="0">
+                    </div>
+                    <div>
+                        <label for="qty-cake">Kage</label>
+                        <input type="number" min="0" id="qty-cake" value="0">
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <label for="stop-special">Special ønske (fritekst)</label>
+                <textarea id="stop-special" placeholder="F.eks. ingen nødder, ring før levering..."></textarea>
+            </div>
+
+            <div class="driver-row" id="active-row" style="display:none;">
+                <label style="flex:1; margin:0;"><input type="checkbox" id="stop-active" checked> Aktiv (medtages i næste ruteberegning)</label>
+            </div>
+
+            <div class="actions">
+                <button type="submit" class="btn full">Gem stop</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="app.js?v=10"></script>
+</body>
+</html>
