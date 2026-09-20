@@ -47,6 +47,7 @@ public class StopRepository {
         s.setQtySandwich(rs.getInt("qty_sandwich"));
         s.setQtyCake(rs.getInt("qty_cake"));
         s.setSpecialOrder(rs.getString("special_order"));
+        s.setFloorDoor(rs.getString("floor_door"));
         s.setActive(rs.getInt("active") == 1);
         s.setCreatedAt(rs.getString("created_at"));
         long preferredDriverId = rs.getLong("preferred_driver_id");
@@ -89,8 +90,8 @@ public class StopRepository {
             PreparedStatement ps = con.prepareStatement("""
                 INSERT INTO stop (customer_name, address, lat, lon, stop_type, deadline,
                     qty_normal_lunchbox, qty_fitness_lunchbox, qty_musli_bar, qty_fruit,
-                    qty_risengroed, qty_sandwich, qty_cake, special_order, active, preferred_driver_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    qty_risengroed, qty_sandwich, qty_cake, special_order, active, preferred_driver_id, floor_door)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, Statement.RETURN_GENERATED_KEYS);
             bind(ps, s);
             return ps;
@@ -104,12 +105,12 @@ public class StopRepository {
             UPDATE stop SET customer_name = ?, address = ?, lat = ?, lon = ?, stop_type = ?, deadline = ?,
                 qty_normal_lunchbox = ?, qty_fitness_lunchbox = ?, qty_musli_bar = ?, qty_fruit = ?,
                 qty_risengroed = ?, qty_sandwich = ?, qty_cake = ?, special_order = ?, active = ?,
-                preferred_driver_id = ?
+                preferred_driver_id = ?, floor_door = ?
             WHERE id = ?
             """,
             ps -> {
                 bind(ps, s);
-                ps.setLong(17, s.getId());
+                ps.setLong(18, s.getId());
             });
     }
 
@@ -154,5 +155,6 @@ public class StopRepository {
         } else {
             ps.setNull(16, Types.INTEGER);
         }
+        ps.setString(17, s.getFloorDoor());
     }
 }

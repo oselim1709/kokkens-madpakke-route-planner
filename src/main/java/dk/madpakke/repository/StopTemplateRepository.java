@@ -48,6 +48,7 @@ public class StopTemplateRepository {
         s.setQtySandwich(rs.getInt("qty_sandwich"));
         s.setQtyCake(rs.getInt("qty_cake"));
         s.setSpecialOrder(rs.getString("special_order"));
+        s.setFloorDoor(rs.getString("floor_door"));
         long preferredDriverId = rs.getLong("preferred_driver_id");
         s.setPreferredDriverId(rs.wasNull() ? null : preferredDriverId);
         s.setActive(true);
@@ -108,8 +109,8 @@ public class StopTemplateRepository {
                 PreparedStatement ps = con.prepareStatement("""
                     INSERT INTO stop_template_item (template_id, customer_name, address, lat, lon, stop_type,
                         deadline, qty_normal_lunchbox, qty_fitness_lunchbox, qty_musli_bar, qty_fruit,
-                        qty_risengroed, qty_sandwich, qty_cake, special_order, preferred_driver_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        qty_risengroed, qty_sandwich, qty_cake, special_order, preferred_driver_id, floor_door)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """);
                 ps.setLong(1, templateId);
                 ps.setString(2, item.getCustomerName());
@@ -139,6 +140,7 @@ public class StopTemplateRepository {
                 } else {
                     ps.setNull(16, Types.INTEGER);
                 }
+                ps.setString(17, item.getFloorDoor());
                 return ps;
             });
         }

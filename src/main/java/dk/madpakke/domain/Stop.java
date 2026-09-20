@@ -21,6 +21,7 @@ public class Stop {
     private int qtySandwich;
     private int qtyCake;
     private String specialOrder;
+    private String floorDoor;
 
     private boolean active = true;
     private String createdAt;
@@ -147,6 +148,14 @@ public class Stop {
 
     public void setQtyCake(int qtyCake) {
         this.qtyCake = qtyCake;
+    }
+
+    public String getFloorDoor() {
+        return floorDoor;
+    }
+
+    public void setFloorDoor(String floorDoor) {
+        this.floorDoor = floorDoor;
     }
 
     public String getSpecialOrder() {

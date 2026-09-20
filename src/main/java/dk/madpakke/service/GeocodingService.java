@@ -43,6 +43,12 @@ import org.springframework.stereotype.Service;
 public class GeocodingService {
 
     private static final Logger log = LoggerFactory.getLogger(GeocodingService.class);
+    private static final double NEARBY_KM = 30;
+
+    // Trailing floor/door notation: ", 3 th", " 2. tv", ", st.", " kl"
+    private static final Pattern TRAILING_FLOOR_DOOR = Pattern.compile(
+        "(?i)(?:[,\\s]+(?:st|kl|\\d{1,2})\\.?[,\\s]*(?:th|tv|mf)\\.?|[,\\s]+(?:th|tv|mf)\\.?|,\\s*(?:st|kl|\\d{1,2})\\.?|\\s+(?:st|kl)\\.?)$");
+
     private static final Pattern LEADING_HOUSE_NUMBER = Pattern.compile("^(.*?\\D)\\s*\\d+\\s*[a-zA-Z]?\\s*(,.*)?$");
 
     // Matches a comma-separated address segment that is Danish floor/door notation rather
@@ -72,12 +78,31 @@ public class GeocodingService {
         return googleApiKey != null && !googleApiKey.isBlank();
     }
 
-    /** Live address suggestions for a partial/possibly-misspelled query, for autocomplete. */
     public List<GeocodeCandidate> search(String query, int limit) {
+        return search(query, limit, null);
+    }
+
+    /**
+     * Live address suggestions for a partial/possibly-misspelled query, for autocomplete.
+     *
+     * @param near when given, suggestions within ~30 km of this point are listed first (so
+     *             "Nørrebrogade 20" means the one in Copenhagen, not Esbjerg).
+     */
+    public List<GeocodeCandidate> search(String query, int limit, GeocodeResult near) {
         if (query == null || query.isBlank() || query.trim().length() < 3) {
             return List.of();
         }
         try {
+            // Denmark's official address register: fuzzy (fixes typos like "Scharlingevej") and
+            // free. Falls through to the other providers when it has nothing or is unreachable.
+            try {
+                List<GeocodeCandidate> dawa = searchWithDawa(query, limit, near);
+                if (!dawa.isEmpty()) {
+                    return dawa;
+                }
+            } catch (Exception e) {
+                log.warn("DAWA-søgning fejlede for '{}': {}", query, e.getMessage());
+            }
             if (usingGoogle()) {
                 List<GeocodeCandidate> results = searchWithGoogle(query, limit);
                 if (!results.isEmpty()) {
@@ -104,7 +129,9 @@ public class GeocodingService {
             return Optional.empty();
         }
         for (String variant : addressVariants(address)) {
-            List<GeocodeCandidate> candidates = search(variant, near != null ? 5 : 1);
+            List<GeocodeCandidate> candidates = search(variant, near != null ? 5 : 1, near).stream()
+                .filter(c -> !c.partial())
+                .toList();
             if (candidates.isEmpty()) {
                 continue;
             }
@@ -176,6 +203,63 @@ public class GeocodingService {
         String street = matcher.group(1).trim();
         String rest = matcher.group(2);
         return rest != null ? street + rest : street;
+    }
+
+    private List<GeocodeCandidate> searchWithDawa(String query, int limit, GeocodeResult near) throws Exception {
+        String cleaned = stripTrailingFloor(query.trim());
+        if (cleaned.length() < 3) {
+            return List.of();
+        }
+        // With a reference point, fetch extra so the nearby matches can be moved to the front.
+        int fetch = near != null ? Math.max(limit, 100) : limit;
+        String url = "https://api.dataforsyningen.dk/autocomplete?type=adgangsadresse&fuzzy=&per_side=" + fetch
+            + "&q=" + URLEncoder.encode(cleaned, StandardCharsets.UTF_8);
+        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+            .timeout(Duration.ofSeconds(8))
+            .GET()
+            .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) {
+            throw new IllegalStateException("HTTP " + response.statusCode());
+        }
+        List<GeocodeCandidate> addresses = new ArrayList<>();
+        List<GeocodeCandidate> streets = new ArrayList<>();
+        JsonNode root = mapper.readTree(response.body());
+        for (JsonNode node : root) {
+            String label = node.path("tekst").asText();
+            JsonNode data = node.path("data");
+            if (data.path("x").isNumber() && data.path("y").isNumber()) {
+                addresses.add(new GeocodeCandidate(label, data.path("y").asDouble(), data.path("x").asDouble()));
+            } else if ("vejnavn".equals(node.path("type").asText())) {
+                streets.add(new GeocodeCandidate(label, 0, 0, true));
+            }
+        }
+        List<GeocodeCandidate> result = addresses.isEmpty() ? streets : addresses;
+        if (near != null && !addresses.isEmpty()) {
+            List<GeocodeCandidate> ordered = new ArrayList<>();
+            addresses.stream().filter(c -> isNearby(c, near)).forEach(ordered::add);
+            addresses.stream().filter(c -> !isNearby(c, near)).forEach(ordered::add);
+            result = ordered;
+        }
+        return result.size() > limit ? result.subList(0, limit) : result;
+    }
+
+    private boolean isNearby(GeocodeCandidate c, GeocodeResult near) {
+        return DistanceUtil.kmBetween(near.lat(), near.lon(), c.lat(), c.lon()) <= NEARBY_KM;
+    }
+
+    /**
+     * "Scharlingevej 21, 3 th" → "Scharlingevej 21". Floor/door in the search text throws the
+     * fuzzy match off (it starts matching other streets), and floor/door belongs in the note anyway.
+     */
+    public static String stripTrailingFloor(String query) {
+        String cleaned = query;
+        String previous;
+        do {
+            previous = cleaned;
+            cleaned = TRAILING_FLOOR_DOOR.matcher(cleaned).replaceFirst("");
+        } while (!cleaned.equals(previous));
+        return cleaned.isBlank() ? query : cleaned.trim();
     }
 
     private List<GeocodeCandidate> searchWithGoogle(String query, int limit) throws Exception {

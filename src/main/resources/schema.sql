@@ -16,13 +16,18 @@ CREATE TABLE IF NOT EXISTS stop (
     special_order TEXT,
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    preferred_driver_id INTEGER REFERENCES driver(id) ON DELETE SET NULL
+    preferred_driver_id INTEGER REFERENCES driver(id) ON DELETE SET NULL,
+    floor_door TEXT
 );
 
 -- Migration for databases created before preferred_driver_id existed. SQLite has no
 -- "ADD COLUMN IF NOT EXISTS", so this relies on spring.sql.init.continue-on-error=true:
 -- it succeeds once, then harmlessly fails ("duplicate column") on every later startup.
 ALTER TABLE stop ADD COLUMN preferred_driver_id INTEGER REFERENCES driver(id) ON DELETE SET NULL;
+
+-- Floor and door ("3. th") kept apart from the address, so the Google Maps link stays clean
+-- while the driver still sees it. Same migration trick.
+ALTER TABLE stop ADD COLUMN floor_door TEXT;
 
 CREATE TABLE IF NOT EXISTS driver (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,5 +95,8 @@ CREATE TABLE IF NOT EXISTS stop_template_item (
     qty_cake INTEGER NOT NULL DEFAULT 0,
     special_order TEXT,
     preferred_driver_id INTEGER REFERENCES driver(id) ON DELETE SET NULL,
+    floor_door TEXT,
     FOREIGN KEY (template_id) REFERENCES stop_template(id) ON DELETE CASCADE
 );
+
+ALTER TABLE stop_template_item ADD COLUMN floor_door TEXT;

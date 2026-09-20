@@ -94,9 +94,16 @@ function attachAddressAutocomplete(inputEl, listEl, onSelect) {
             btn.addEventListener("mousedown", e => {
                 e.preventDefault(); // keep focus so the subsequent blur doesn't race the click
                 const candidate = candidates[i];
-                inputEl.value = candidate.label;
                 hide();
-                onSelect(candidate);
+                if (candidate.partial) {
+                    // Only a street name so far: complete the text and let the user type the number.
+                    inputEl.value = candidate.label.trim() + " ";
+                    inputEl.focus();
+                    return;
+                }
+                const typedText = inputEl.value;
+                inputEl.value = candidate.label;
+                onSelect(candidate, typedText);
             });
         });
     }
@@ -204,7 +211,7 @@ function renderStops() {
             <div class="row">
                 <div>
                     <h3>${esc(stop.customerName)}</h3>
-                    <div class="muted">${esc(stop.address)}${deadline}</div>
+                    <div class="muted">${esc(stop.address)}${stop.floorDoor ? ` · Etage/dør: ${esc(stop.floorDoor)}` : ""}${deadline}</div>
                     ${!stop.geocoded ? `<div class="address-status pending">⚠ Adresse ikke fundet endnu — redigér og vælg fra listen</div>` : ""}
                     ${preferredDriver ? `<div class="muted">🚐 Foretrukken chauffør: ${esc(preferredDriver.name)}</div>` : ""}
                 </div>
@@ -340,8 +347,22 @@ function setStopAddressStatus(text, ok) {
     stopAddressStatus.className = "address-status" + (ok ? " ok" : (text ? " pending" : ""));
 }
 
-attachAddressAutocomplete(stopAddressInput, document.getElementById("stop-address-suggestions"), candidate => {
+// Trailing floor/door in what was typed ("21, 3 th", "21 2. tv", "5 st") — mirrors the server's rule.
+const TRAILING_FLOOR_DOOR = /(?:[,\s]+(?:st|kl|\d{1,2})\.?[,\s]*(?:th|tv|mf)\.?|[,\s]+(?:th|tv|mf)\.?|,\s*(?:st|kl|\d{1,2})\.?|\s+(?:st|kl)\.?)$/i;
+
+function extractFloorDoor(text) {
+    const match = (text || "").trim().match(TRAILING_FLOOR_DOOR);
+    return match ? match[0].replace(/^[,\s]+/, "").trim() : "";
+}
+
+attachAddressAutocomplete(stopAddressInput, document.getElementById("stop-address-suggestions"), (candidate, typedText) => {
     if (candidate) {
+        // Picking a suggestion replaces the text, so keep any floor/door the user typed.
+        const floorInput = document.getElementById("stop-floor");
+        const typedFloor = extractFloorDoor(typedText);
+        if (typedFloor && !floorInput.value.trim()) {
+            floorInput.value = typedFloor;
+        }
         selectedStopCoords = { lat: candidate.lat, lon: candidate.lon };
         setStopAddressStatus("✓ Adresse fundet", true);
     } else {
@@ -361,6 +382,7 @@ async function openStopModal(stop) {
     document.getElementById("stop-id").value = stop ? stop.id : "";
     document.getElementById("stop-customer").value = stop ? stop.customerName : "";
     document.getElementById("stop-address").value = stop ? stop.address : "";
+    document.getElementById("stop-floor").value = stop ? (stop.floorDoor || "") : "";
     document.querySelector(`input[name="stop-type"][value="${stop ? stop.stopType : "PRIVATE"}"]`).checked = true;
     document.getElementById("stop-deadline").value = stop && stop.deadline ? stop.deadline.substring(0, 5) : "";
 
@@ -424,6 +446,7 @@ stopForm.addEventListener("submit", async e => {
         qtyRisengroed: Number(document.getElementById("qty-risengroed").value) || 0,
         qtySandwich: Number(document.getElementById("qty-sandwich").value) || 0,
         qtyCake: Number(document.getElementById("qty-cake").value) || 0,
+        floorDoor: document.getElementById("stop-floor").value.trim(),
         specialOrder: document.getElementById("stop-special").value.trim(),
         active: id ? document.getElementById("stop-active").checked : true,
         lat: selectedStopCoords ? selectedStopCoords.lat : null,
@@ -573,7 +596,7 @@ function renderRoutes(skippedStops) {
                         <strong>${i + 1}. ${esc(stop.customerName)}</strong>
                         ${typeBadge}
                     </div>
-                    <div class="muted">${esc(stop.address)}${deadline}</div>
+                    <div class="muted">${esc(stop.address)}${stop.floorDoor ? ` · <strong>Etage/dør: ${esc(stop.floorDoor)}</strong>` : ""}${deadline}</div>
                     ${items ? `<div class="items">${esc(items)}</div>` : ""}
                     ${stop.specialOrder ? `<div class="muted items">Special: ${esc(stop.specialOrder)}</div>` : ""}
                 </div>`;

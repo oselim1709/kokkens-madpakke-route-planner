@@ -79,6 +79,7 @@ public class StopTemplateController {
                         copy.setQtySandwich(item.getQtySandwich());
                         copy.setQtyCake(item.getQtyCake());
                         copy.setSpecialOrder(item.getSpecialOrder());
+                        copy.setFloorDoor(item.getFloorDoor());
                         copy.setPreferredDriverId(item.getPreferredDriverId());
                         copy.setActive(true);
                         return stopRepository.insert(copy);

@@ -41,7 +41,11 @@ public class RouteTextFormatter {
         int i = 1;
         for (Stop stop : route.getStops()) {
             sb.append(i++).append(") ").append(stop.getCustomerName())
-                .append(" – ").append(stop.getAddress()).append('\n');
+                .append(" – ").append(stop.getAddress());
+            if (stop.getFloorDoor() != null && !stop.getFloorDoor().isBlank()) {
+                sb.append(" (etage/dør: ").append(stop.getFloorDoor().trim()).append(')');
+            }
+            sb.append('\n');
 
             sb.append("   Type: ").append(stop.getStopType() == StopType.GYM ? "Gym" : "Privat");
             if (stop.getDeadline() != null) {
