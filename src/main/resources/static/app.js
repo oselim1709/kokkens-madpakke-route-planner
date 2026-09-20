@@ -616,7 +616,33 @@ async function loadSettings() {
         : (settings.depotAddress ? "Kunne ikke finde adressen endnu — skriv den igen og vælg fra listen." : "Ingen startadresse sat endnu.");
     document.getElementById("geocode-status").textContent = "Geokodning: "
         + (settings.usingGoogleGeocoding ? "Google Maps API" : "OpenStreetMap/Nominatim (gratis)");
+    loadBackupStatus();
 }
+
+async function loadBackupStatus() {
+    const el = document.getElementById("backup-status");
+    try {
+        const { backups } = await api("/api/backup");
+        if (backups.length === 0) {
+            el.textContent = "Ingen kopier på serveren endnu.";
+            return;
+        }
+        const newest = new Date(backups[0].createdAt).toLocaleString("da-DK", { dateStyle: "medium", timeStyle: "short" });
+        el.textContent = `Seneste kopi på serveren: ${newest} (${backups.length} gemt i alt).`;
+    } catch (e) {
+        el.textContent = "Kunne ikke læse status for sikkerhedskopier.";
+    }
+}
+
+document.getElementById("btn-backup-now").addEventListener("click", async () => {
+    try {
+        await api("/api/backup/now", { method: "POST" });
+        showToast("Sikkerhedskopi taget");
+        loadBackupStatus();
+    } catch (e) {
+        showToast(e.message);
+    }
+});
 
 document.getElementById("btn-save-depot").addEventListener("click", async () => {
     const address = document.getElementById("depot-address").value.trim();

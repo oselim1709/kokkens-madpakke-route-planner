@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Kokkens Madpakke Route Planner</title>
-<link rel="stylesheet" href="style.css?v=10">
+<link rel="stylesheet" href="style.css?v=11">
 </head>
 <body>
 
@@ -143,6 +143,15 @@
             <p class="muted">Google Maps-nøgle sættes via miljøvariablen <code>GOOGLE_MAPS_API_KEY</code> (valgfrit). Uden nøgle bruges gratis OpenStreetMap/Nominatim automatisk.</p>
         </div>
         <div class="card">
+            <h3>Sikkerhedskopi</h3>
+            <p class="muted">Systemet tager automatisk en kopi af alle jeres data hver søndag nat (de seneste 8 gemmes). Vil du være helt sikker, kan du hente en kopi ned på din egen telefon/computer og gemme den et andet sted.</p>
+            <a class="btn full" style="text-align:center;" href="/api/backup/download" download>Hent sikkerhedskopi til min enhed</a>
+            <div class="actions">
+                <button class="btn secondary small" id="btn-backup-now">Tag en kopi nu</button>
+            </div>
+            <p class="muted" id="backup-status"></p>
+        </div>
+        <div class="card">
             <h3 style="color:var(--danger);">Nulstil alt</h3>
             <p class="muted">Sletter ALLE stops og ALLE ruter permanent. Brug det til at starte helt forfra. Kan ikke fortrydes.</p>
             <button class="btn danger full" id="btn-reset-all">Nulstil alle stop og ruter</button>
@@ -251,6 +260,6 @@
     </div>
 </div>
 
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>

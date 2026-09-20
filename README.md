@@ -46,3 +46,9 @@ køretid estimeres ud fra lige-linje-afstand og en antaget gennemsnitsfart
 (default 30 km/t, kan ændres i `application.properties`). Stops fordeles
 geografisk mellem chaufførerne og forsøges balanceret efter estimeret
 tid pr. rute; stops med en deadline besøges først, i deadline-rækkefølge.
+
+## Sikkerhedskopier
+
+- Hver søndag kl. 03:00 (dansk tid) tages en kopi af databasen i mappen `backups` ved siden af databasen (på Render: `/data/backups`). De seneste 8 ugentlige kopier gemmes. Hvis serveren har været nede søndag nat, tages en kopi ved næste opstart.
+- Under **Indstillinger** kan man hente en kopi ned på sin egen enhed eller tage en ekstra kopi med det samme (de seneste 5 manuelle gemmes).
+- Kopierne er almindelige SQLite-filer. Gendannelse: stop appen og erstat `madpakke.db` med den ønskede kopi.
