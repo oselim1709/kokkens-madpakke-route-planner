@@ -91,6 +91,19 @@ public class RouteRepository {
         return routes.stream().findFirst();
     }
 
+    /** Replaces which stops (in which order) each of the given routes has. All-or-nothing. */
+    @Transactional
+    public void replaceStops(Map<Long, List<Long>> stopIdsByRouteId) {
+        for (Map.Entry<Long, List<Long>> entry : stopIdsByRouteId.entrySet()) {
+            jdbc.update("DELETE FROM route_stop WHERE route_id = ?", entry.getKey());
+            int order = 0;
+            for (Long stopId : entry.getValue()) {
+                jdbc.update("INSERT INTO route_stop (route_id, stop_id, stop_order) VALUES (?, ?, ?)",
+                    entry.getKey(), stopId, order++);
+            }
+        }
+    }
+
     public void updateEstimatedMinutes(long routeId, double minutes) {
         jdbc.update("UPDATE route SET estimated_minutes = ? WHERE id = ?", minutes, routeId);
     }

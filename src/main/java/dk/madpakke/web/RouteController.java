@@ -2,6 +2,7 @@ package dk.madpakke.web;
 
 import dk.madpakke.domain.Driver;
 import dk.madpakke.domain.Route;
+import dk.madpakke.domain.Stop;
 import dk.madpakke.repository.DriverRepository;
 import dk.madpakke.repository.RouteRepository;
 import dk.madpakke.service.GoogleMapsUrlBuilder;
@@ -10,8 +11,11 @@ import dk.madpakke.service.RouteGenerationService;
 import dk.madpakke.service.RouteTextFormatter;
 import dk.madpakke.service.SettingsService;
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -77,6 +81,44 @@ public class RouteController {
         List<Route> routes = routeRepository.findByDate(LocalDate.now().toString());
         routes.forEach(this::attachMapUrl);
         return routes;
+    }
+
+    /** One route's new stop list, in driving order. */
+    public record RouteStops(long routeId, List<Long> stopIds) {
+    }
+
+    public record RouteLayout(List<RouteStops> routes) {
+    }
+
+    /**
+     * Manually sets which stops each of today's routes has, and their order — e.g. to move a few
+     * stops from one driver to another while leaving everything else as it was. It must cover
+     * exactly today's routes and exactly today's stops (every stop once), so nothing can get lost.
+     */
+    @PutMapping("/layout")
+    public ResponseEntity<?> setLayout(@RequestBody RouteLayout layout) {
+        List<Route> current = routeRepository.findByDate(LocalDate.now().toString());
+        Set<Long> currentRouteIds = current.stream().map(Route::getId).collect(Collectors.toSet());
+        Set<Long> givenRouteIds = layout.routes().stream().map(RouteStops::routeId).collect(Collectors.toSet());
+        List<Long> currentStopIds = current.stream().flatMap(r -> r.getStops().stream()).map(Stop::getId).sorted().toList();
+        List<Long> givenStopIds = layout.routes().stream().flatMap(r -> r.stopIds().stream()).sorted().toList();
+        if (!currentRouteIds.equals(givenRouteIds) || layout.routes().size() != currentRouteIds.size()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Skal indeholde præcis dagens ruter."));
+        }
+        if (!currentStopIds.equals(givenStopIds)) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Skal indeholde præcis de samme stops som ruterne har nu, hvert stop én gang."));
+        }
+        routeRepository.replaceStops(layout.routes().stream()
+            .collect(Collectors.toMap(RouteStops::routeId, RouteStops::stopIds, (a, b) -> a, LinkedHashMap::new)));
+        // Times depend on the stops and their order, so recompute them for the drivers' routes.
+        for (Route route : routeRepository.findByDate(LocalDate.now().toString())) {
+            Driver driver = route.getDriverId() == null ? null : driverRepository.findById(route.getDriverId()).orElse(null);
+            double minutes = routeGenerationService.estimateMinutes(route.getStops(), driver);
+            if (minutes >= 0) {
+                routeRepository.updateEstimatedMinutes(route.getId(), minutes);
+            }
+        }
+        return ResponseEntity.ok(today());
     }
 
     @PutMapping("/{id}/driver")
