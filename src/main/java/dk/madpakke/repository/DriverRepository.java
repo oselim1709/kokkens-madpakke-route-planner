@@ -4,6 +4,7 @@ import dk.madpakke.domain.Driver;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -19,8 +20,15 @@ public class DriverRepository {
         this.jdbc = jdbc;
     }
 
-    private static final RowMapper<Driver> MAPPER =
-        (rs, i) -> new Driver(rs.getLong("id"), rs.getString("name"), rs.getInt("active") == 1);
+    private static final RowMapper<Driver> MAPPER = (rs, i) -> {
+        Driver d = new Driver(rs.getLong("id"), rs.getString("name"), rs.getInt("active") == 1);
+        d.setEndAddress(rs.getString("end_address"));
+        double lat = rs.getDouble("end_lat");
+        d.setEndLat(rs.wasNull() ? null : lat);
+        double lon = rs.getDouble("end_lon");
+        d.setEndLon(rs.wasNull() ? null : lon);
+        return d;
+    };
 
     public List<Driver> findAll() {
         return jdbc.query("SELECT * FROM driver ORDER BY name", MAPPER);
@@ -43,6 +51,17 @@ public class DriverRepository {
 
     public void update(long id, String name) {
         jdbc.update("UPDATE driver SET name = ? WHERE id = ?", name, id);
+    }
+
+    public Optional<Driver> findById(long id) {
+        return jdbc.query("SELECT * FROM driver WHERE id = ?", MAPPER, id).stream().findFirst();
+    }
+
+    /** Pass a null/blank address to clear the end address. */
+    public void setEnd(long id, String address, Double lat, Double lon) {
+        boolean clear = address == null || address.isBlank();
+        jdbc.update("UPDATE driver SET end_address = ?, end_lat = ?, end_lon = ? WHERE id = ?",
+            clear ? null : address.trim(), clear ? null : lat, clear ? null : lon, id);
     }
 
     public void setActive(long id, boolean active) {

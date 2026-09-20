@@ -18,14 +18,24 @@ final class TravelTimeMatrix {
     private final GeocodeResult depot;
     private final double avgSpeedKmh;
     private final Map<Long, Integer> indexByStopId;
+    private final Map<GeocodeResult, Integer> indexByEndPoint;
     private final List<Stop> stopsByIndex;
     private final double[][] durationMinutes; // may be null (OSRM unavailable) — always fall back then
 
-    static TravelTimeMatrix build(GeocodeResult depot, List<Stop> stops, RoutingService routingService, double avgSpeedKmh) {
+    /** @param endPoints distinct end-of-route locations (drivers' end addresses); may be empty. */
+    static TravelTimeMatrix build(GeocodeResult depot, List<Stop> stops, List<GeocodeResult> endPoints,
+                                   RoutingService routingService, double avgSpeedKmh) {
         List<GeocodeResult> points = new ArrayList<>();
         points.add(depot);
         for (Stop stop : stops) {
             points.add(new GeocodeResult(stop.getLat(), stop.getLon()));
+        }
+        Map<GeocodeResult, Integer> indexByEndPoint = new HashMap<>();
+        for (GeocodeResult end : endPoints) {
+            if (!indexByEndPoint.containsKey(end)) {
+                indexByEndPoint.put(end, points.size());
+                points.add(end);
+            }
         }
         double[][] matrix = routingService.fetchDurationMatrixMinutes(points);
 
@@ -33,14 +43,16 @@ final class TravelTimeMatrix {
         for (int i = 0; i < stops.size(); i++) {
             indexByStopId.put(stops.get(i).getId(), i + 1); // +1: depot occupies index 0
         }
-        return new TravelTimeMatrix(depot, avgSpeedKmh, indexByStopId, stops, matrix);
+        return new TravelTimeMatrix(depot, avgSpeedKmh, indexByStopId, indexByEndPoint, stops, matrix);
     }
 
     private TravelTimeMatrix(GeocodeResult depot, double avgSpeedKmh, Map<Long, Integer> indexByStopId,
+                              Map<GeocodeResult, Integer> indexByEndPoint,
                               List<Stop> stopsByIndex, double[][] durationMinutes) {
         this.depot = depot;
         this.avgSpeedKmh = avgSpeedKmh;
         this.indexByStopId = indexByStopId;
+        this.indexByEndPoint = indexByEndPoint;
         this.stopsByIndex = stopsByIndex;
         this.durationMinutes = durationMinutes;
     }
@@ -52,6 +64,15 @@ final class TravelTimeMatrix {
     double between(Stop from, Stop to) {
         return minutesBetween(indexByStopId.get(from.getId()), indexByStopId.get(to.getId()),
             from.getLat(), from.getLon(), to.getLat(), to.getLon());
+    }
+
+    /** Driving time from a stop to a driver's end location (which must have been passed to build). */
+    double toEnd(Stop from, GeocodeResult end) {
+        Integer endIndex = indexByEndPoint.get(end);
+        if (endIndex == null) {
+            return DistanceUtil.kmBetween(from.getLat(), from.getLon(), end.lat(), end.lon()) / avgSpeedKmh * 60;
+        }
+        return minutesBetween(indexByStopId.get(from.getId()), endIndex, from.getLat(), from.getLon(), end.lat(), end.lon());
     }
 
     private double minutesBetween(int fromIndex, int toIndex, double fromLat, double fromLon, double toLat, double toLon) {

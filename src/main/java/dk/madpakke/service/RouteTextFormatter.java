@@ -21,9 +21,13 @@ public class RouteTextFormatter {
         sb.append("Estimeret tid: ").append(formatMinutes(route.getEstimatedMinutes())).append('\n');
         if (route.getGoogleMapsUrl() != null) {
             sb.append("Naviger: ").append(route.getGoogleMapsUrl()).append('\n');
+            if (route.getEndAddress() != null) {
+                sb.append("Slutadresse: ").append(route.getEndAddress()).append('\n');
+            }
             if (route.getGoogleMapsExcludedStopCount() > 0) {
                 int coveredCount = route.getStops().size() - route.getGoogleMapsExcludedStopCount();
-                sb.append("⚠ OBS: Google Maps kan kun tage 10 stop ad gangen (inkl. startpunkt). Linket dækker kun stop 1-")
+                sb.append("⚠ OBS: Google Maps kan kun tage 10 stop ad gangen (inkl. startpunkt"
+                    + (route.getEndAddress() != null ? " og slutadresse" : "") + "). Linket dækker kun stop 1-")
                     .append(coveredCount)
                     .append(". Efter dem skal du navigere manuelt til de resterende ")
                     .append(route.getGoogleMapsExcludedStopCount())

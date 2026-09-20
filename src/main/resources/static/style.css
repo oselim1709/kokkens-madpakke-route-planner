@@ -454,3 +454,17 @@ select.driver-select {
     font: inherit;
     background: #fff;
 }
+
+.card .address-field input[type="text"] {
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font: inherit;
+    background: #fff;
+    margin-top: 6px;
+}
+
+.card .address-field > label.muted {
+    display: block;
+}

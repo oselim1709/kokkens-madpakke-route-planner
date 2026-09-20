@@ -91,6 +91,10 @@ public class RouteRepository {
         return routes.stream().findFirst();
     }
 
+    public void updateEstimatedMinutes(long routeId, double minutes) {
+        jdbc.update("UPDATE route SET estimated_minutes = ? WHERE id = ?", minutes, routeId);
+    }
+
     public void assignDriver(long routeId, Long driverId) {
         if (driverId == null) {
             jdbc.update("UPDATE route SET driver_id = NULL WHERE id = ?", routeId);

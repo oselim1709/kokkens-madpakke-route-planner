@@ -1,6 +1,8 @@
 package dk.madpakke.web;
 
+import dk.madpakke.domain.Driver;
 import dk.madpakke.domain.Route;
+import dk.madpakke.repository.DriverRepository;
 import dk.madpakke.repository.RouteRepository;
 import dk.madpakke.service.GoogleMapsUrlBuilder;
 import dk.madpakke.service.RouteGenerationResult;
@@ -29,22 +31,31 @@ public class RouteController {
     private final RouteRepository routeRepository;
     private final RouteTextFormatter routeTextFormatter;
     private final SettingsService settingsService;
+    private final DriverRepository driverRepository;
 
     public RouteController(RouteGenerationService routeGenerationService,
                             RouteRepository routeRepository,
                             RouteTextFormatter routeTextFormatter,
-                            SettingsService settingsService) {
+                            SettingsService settingsService,
+                            DriverRepository driverRepository) {
         this.routeGenerationService = routeGenerationService;
         this.routeRepository = routeRepository;
         this.routeTextFormatter = routeTextFormatter;
         this.settingsService = settingsService;
+        this.driverRepository = driverRepository;
     }
 
-    /** Routes loaded from the DB don't carry a map link (it's not persisted) — fill it in from the current depot. */
+    /**
+     * Routes loaded from the DB don't carry a map link or end address (not persisted) — fill them
+     * in from the current depot and the assigned driver's current end address.
+     */
     private void attachMapUrl(Route route) {
+        String endAddress = route.getDriverId() == null ? null
+            : driverRepository.findById(route.getDriverId()).map(Driver::getEndAddress).orElse(null);
+        route.setEndAddress(endAddress == null || endAddress.isBlank() ? null : endAddress.trim());
         if (settingsService.hasDepotCoordinates()) {
-            route.setGoogleMapsUrl(GoogleMapsUrlBuilder.build(settingsService.getDepotAddress(), route.getStops()));
-            route.setGoogleMapsExcludedStopCount(GoogleMapsUrlBuilder.excludedStopCount(route.getStops()));
+            route.setGoogleMapsUrl(GoogleMapsUrlBuilder.build(settingsService.getDepotAddress(), route.getStops(), route.getEndAddress()));
+            route.setGoogleMapsExcludedStopCount(GoogleMapsUrlBuilder.excludedStopCount(route.getStops(), route.getEndAddress()));
         }
     }
 
@@ -73,6 +84,14 @@ public class RouteController {
         Object driverIdRaw = body.get("driverId");
         Long driverId = driverIdRaw == null ? null : Long.valueOf(driverIdRaw.toString());
         routeRepository.assignDriver(id, driverId);
+        // A different driver can mean a different end address, so the total time changes too.
+        routeRepository.findById(id).ifPresent(route -> {
+            Driver driver = driverId == null ? null : driverRepository.findById(driverId).orElse(null);
+            double minutes = routeGenerationService.estimateMinutes(route.getStops(), driver);
+            if (minutes >= 0) {
+                routeRepository.updateEstimatedMinutes(id, minutes);
+            }
+        });
         return ResponseEntity.noContent().build();
     }
 

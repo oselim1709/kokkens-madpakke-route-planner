@@ -21,6 +21,9 @@ import java.util.List;
  * point plus waypoints plus destination). A route with more stops than that gets a link
  * covering only the first {@link #MAX_STOPS_IN_LINK} stops — {@link #excludedStopCount}
  * tells the caller how many were left out, so they can flag it for the driver.
+ *
+ * A driver may also have an end address: it becomes the link's destination (the last stop
+ * turns into a waypoint), and it uses up one of the 10 locations.
  */
 public final class GoogleMapsUrlBuilder {
 
@@ -31,21 +34,38 @@ public final class GoogleMapsUrlBuilder {
     private GoogleMapsUrlBuilder() {
     }
 
+    private static boolean hasEnd(String endAddress) {
+        return endAddress != null && !endAddress.isBlank();
+    }
+
+    /** How many stops fit in the link: the origin (and the end address, if any) take a slot each. */
+    public static int maxStopsInLink(String endAddress) {
+        return hasEnd(endAddress) ? MAX_STOPS_IN_LINK - 1 : MAX_STOPS_IN_LINK;
+    }
+
     public static String build(String originAddress, List<Stop> orderedStops) {
+        return build(originAddress, orderedStops, null);
+    }
+
+    /** @param endAddress where the route finishes; null/blank = the last stop is the destination. */
+    public static String build(String originAddress, List<Stop> orderedStops, String endAddress) {
         if (orderedStops == null || orderedStops.isEmpty() || originAddress == null || originAddress.isBlank()) {
             return null;
         }
-        List<Stop> included = orderedStops.size() > MAX_STOPS_IN_LINK
-            ? orderedStops.subList(0, MAX_STOPS_IN_LINK)
+        int maxStops = maxStopsInLink(endAddress);
+        List<Stop> included = orderedStops.size() > maxStops
+            ? orderedStops.subList(0, maxStops)
             : orderedStops;
 
         StringBuilder url = new StringBuilder("https://www.google.com/maps/dir/?api=1&travelmode=driving");
         url.append("&origin=").append(encode(originAddress));
 
-        Stop last = included.get(included.size() - 1);
-        url.append("&destination=").append(encode(last.getAddress()));
+        // With an end address every stop is a waypoint; otherwise the last stop is the destination.
+        boolean withEnd = hasEnd(endAddress);
+        List<Stop> waypointStops = withEnd ? included : included.subList(0, included.size() - 1);
+        url.append("&destination=").append(encode(withEnd ? endAddress.trim() : included.get(included.size() - 1).getAddress()));
 
-        if (included.size() > 1) {
+        if (!waypointStops.isEmpty()) {
             // Build the raw "address|address|..." string first, then percent-encode it as one
             // unit — a bare "|" is not a safe URL character, and while browsers usually tolerate
             // it when a link is clicked directly, an app that re-parses a pasted/shared copy of
@@ -53,9 +73,9 @@ public final class GoogleMapsUrlBuilder {
             // e.g. truncating at the first "|" and silently falling back to some default
             // destination. Encoding it as %7C is unambiguous everywhere.
             StringBuilder rawWaypoints = new StringBuilder();
-            for (int i = 0; i < included.size() - 1; i++) {
+            for (int i = 0; i < waypointStops.size(); i++) {
                 if (i > 0) rawWaypoints.append("|");
-                rawWaypoints.append(included.get(i).getAddress());
+                rawWaypoints.append(waypointStops.get(i).getAddress());
             }
             url.append("&waypoints=").append(URLEncoder.encode(rawWaypoints.toString(), StandardCharsets.UTF_8));
         }
@@ -64,10 +84,14 @@ public final class GoogleMapsUrlBuilder {
 
     /** How many of the route's stops are NOT covered by the link (0 if it covers all of them). */
     public static int excludedStopCount(List<Stop> orderedStops) {
+        return excludedStopCount(orderedStops, null);
+    }
+
+    public static int excludedStopCount(List<Stop> orderedStops, String endAddress) {
         if (orderedStops == null) {
             return 0;
         }
-        return Math.max(0, orderedStops.size() - MAX_STOPS_IN_LINK);
+        return Math.max(0, orderedStops.size() - maxStopsInLink(endAddress));
     }
 
     private static String encode(String value) {

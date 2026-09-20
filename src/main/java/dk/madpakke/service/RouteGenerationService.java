@@ -13,6 +13,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -117,7 +118,8 @@ public class RouteGenerationService {
         // Only drivers switched on for the day get routes; stops pinned to an inactive driver are spread like unpinned ones.
         List<Driver> drivers = driverRepository.findActive();
         String depotAddress = settingsService.getDepotAddress();
-        TravelTimeMatrix travelTimes = TravelTimeMatrix.build(depot, geocodable, routingService, avgSpeedKmh);
+        List<GeocodeResult> endPoints = drivers.stream().map(this::endPointOf).filter(Objects::nonNull).distinct().toList();
+        TravelTimeMatrix travelTimes = TravelTimeMatrix.build(depot, geocodable, endPoints, routingService, avgSpeedKmh);
 
         List<Route> routes = drivers.isEmpty()
             ? buildRoutesWithoutDrivers(geocodable, depot, travelTimes, depotAddress, today)
@@ -145,7 +147,7 @@ public class RouteGenerationService {
             List<Stop> swept = sweepByAngle(geocodable, depot);
             List<List<Stop>> buckets = splitIntoBalancedGroups(swept, numRoutes);
             List<Route> routes = buildRoutesFromBuckets(buckets, drivers, travelTimes, depotAddress, today);
-            rebalanceByRealTime(routes, travelTimes, depotAddress);
+            rebalanceByRealTime(routes, drivers, travelTimes, depotAddress);
             return routes;
         }
 
@@ -193,15 +195,12 @@ public class RouteGenerationService {
             Route route = new Route();
             route.setRouteDate(today);
             route.setSequenceIndex(sequenceIndex++);
-            route.setStops(ordered);
-            route.setEstimatedMinutes(estimateRouteMinutes(ordered, travelTimes));
-            route.setGoogleMapsUrl(GoogleMapsUrlBuilder.build(depotAddress, ordered));
-            route.setGoogleMapsExcludedStopCount(GoogleMapsUrlBuilder.excludedStopCount(ordered));
             route.setDriverId(driver.getId());
             route.setDriverName(driver.getName());
+            applyStops(route, ordered, driver, travelTimes, depotAddress);
             routes.add(route);
         }
-        rebalanceByRealTime(routes, travelTimes, depotAddress);
+        rebalanceByRealTime(routes, drivers, travelTimes, depotAddress);
         return routes;
     }
 
@@ -218,15 +217,12 @@ public class RouteGenerationService {
             Route route = new Route();
             route.setRouteDate(today);
             route.setSequenceIndex(i);
-            route.setStops(ordered);
-            route.setEstimatedMinutes(estimateRouteMinutes(ordered, travelTimes));
-            route.setGoogleMapsUrl(GoogleMapsUrlBuilder.build(depotAddress, ordered));
-            route.setGoogleMapsExcludedStopCount(GoogleMapsUrlBuilder.excludedStopCount(ordered));
-            if (drivers != null && i < drivers.size()) {
-                Driver driver = drivers.get(i);
+            Driver driver = drivers != null && i < drivers.size() ? drivers.get(i) : null;
+            if (driver != null) {
                 route.setDriverId(driver.getId());
                 route.setDriverName(driver.getName());
             }
+            applyStops(route, ordered, driver, travelTimes, depotAddress);
             routes.add(route);
         }
         return routes;
@@ -238,10 +234,12 @@ public class RouteGenerationService {
      * Never moves a stop that's pinned to the route's own driver, and never fully empties
      * a route. Stops once the gap is small enough or no further move helps.
      */
-    private void rebalanceByRealTime(List<Route> routes, TravelTimeMatrix travelTimes, String depotAddress) {
+    private void rebalanceByRealTime(List<Route> routes, List<Driver> drivers, TravelTimeMatrix travelTimes,
+                                      String depotAddress) {
         if (routes.size() < 2) {
             return;
         }
+        Map<Long, Driver> driversById = drivers.stream().collect(Collectors.toMap(Driver::getId, d -> d));
         for (int iteration = 0; iteration < MAX_REBALANCE_MOVES; iteration++) {
             Route heaviest = routes.stream().max(Comparator.comparingDouble(Route::getEstimatedMinutes)).orElseThrow();
             Route lightest = routes.stream()
@@ -275,8 +273,10 @@ public class RouteGenerationService {
 
                     List<Stop> heavyOrdered = orderStops(newHeavyStops, travelTimes);
                     List<Stop> lightOrdered = orderStops(newLightStops, travelTimes);
-                    double heavyMinutes = estimateRouteMinutes(heavyOrdered, travelTimes);
-                    double lightMinutes = estimateRouteMinutes(lightOrdered, travelTimes);
+                    double heavyMinutes = estimateRouteMinutes(heavyOrdered, travelTimes,
+                        endPointOf(driversById.get(heaviest.getDriverId())));
+                    double lightMinutes = estimateRouteMinutes(lightOrdered, travelTimes,
+                        endPointOf(driversById.get(lightest.getDriverId())));
                     double newGap = Math.abs(heavyMinutes - lightMinutes);
 
                     if (newGap < bestGap) {
@@ -294,15 +294,8 @@ public class RouteGenerationService {
                 return;
             }
 
-            heaviest.setStops(bestHeavyOrdered);
-            heaviest.setEstimatedMinutes(bestHeavyMinutes);
-            heaviest.setGoogleMapsUrl(GoogleMapsUrlBuilder.build(depotAddress, bestHeavyOrdered));
-            heaviest.setGoogleMapsExcludedStopCount(GoogleMapsUrlBuilder.excludedStopCount(bestHeavyOrdered));
-
-            lightest.setStops(bestLightOrdered);
-            lightest.setEstimatedMinutes(bestLightMinutes);
-            lightest.setGoogleMapsUrl(GoogleMapsUrlBuilder.build(depotAddress, bestLightOrdered));
-            lightest.setGoogleMapsExcludedStopCount(GoogleMapsUrlBuilder.excludedStopCount(bestLightOrdered));
+            applyStops(heaviest, bestHeavyOrdered, driversById.get(heaviest.getDriverId()), travelTimes, depotAddress);
+            applyStops(lightest, bestLightOrdered, driversById.get(lightest.getDriverId()), travelTimes, depotAddress);
         }
     }
 
@@ -380,8 +373,11 @@ public class RouteGenerationService {
         return ordered;
     }
 
-    /** Depot is only the route's starting point — no return leg is budgeted or navigated back to it. */
-    private double estimateRouteMinutes(List<Stop> orderedStops, TravelTimeMatrix travelTimes) {
+    /**
+     * The depot is only the route's starting point — no return leg is budgeted or navigated back
+     * to it. If the driver has an end address, the drive from the last stop there is included.
+     */
+    private double estimateRouteMinutes(List<Stop> orderedStops, TravelTimeMatrix travelTimes, GeocodeResult end) {
         double minutes = 0;
         Stop previous = null;
         for (Stop stop : orderedStops) {
@@ -389,7 +385,46 @@ public class RouteGenerationService {
             minutes += onSiteMinutes(stop);
             previous = stop;
         }
+        if (end != null && previous != null) {
+            minutes += travelTimes.toEnd(previous, end);
+        }
         return minutes;
+    }
+
+    /** Sets a route's stops and everything derived from them for its driver (time, end address, map link). */
+    private void applyStops(Route route, List<Stop> ordered, Driver driver, TravelTimeMatrix travelTimes,
+                             String depotAddress) {
+        String endAddress = endAddressOf(driver);
+        route.setStops(ordered);
+        route.setEndAddress(endAddress);
+        route.setEstimatedMinutes(estimateRouteMinutes(ordered, travelTimes, endPointOf(driver)));
+        route.setGoogleMapsUrl(GoogleMapsUrlBuilder.build(depotAddress, ordered, endAddress));
+        route.setGoogleMapsExcludedStopCount(GoogleMapsUrlBuilder.excludedStopCount(ordered, endAddress));
+    }
+
+    private GeocodeResult endPointOf(Driver driver) {
+        return driver != null && driver.isEndGeocoded() ? new GeocodeResult(driver.getEndLat(), driver.getEndLon()) : null;
+    }
+
+    private String endAddressOf(Driver driver) {
+        return driver != null && driver.getEndAddress() != null && !driver.getEndAddress().isBlank()
+            ? driver.getEndAddress().trim() : null;
+    }
+
+    /**
+     * Driving + on-site time for stops already in their final order, for one driver — used when a
+     * route is handed to a different driver afterwards (a different end address changes the total).
+     */
+    public double estimateMinutes(List<Stop> orderedStops, Driver driver) {
+        if (orderedStops.isEmpty() || !settingsService.hasDepotCoordinates()
+            || orderedStops.stream().anyMatch(s -> !s.isGeocoded())) {
+            return -1;
+        }
+        GeocodeResult depot = settingsService.getDepotCoordinates();
+        GeocodeResult end = endPointOf(driver);
+        TravelTimeMatrix travelTimes = TravelTimeMatrix.build(depot, orderedStops,
+            end == null ? List.of() : List.of(end), routingService, avgSpeedKmh);
+        return estimateRouteMinutes(orderedStops, travelTimes, end);
     }
 
     private int onSiteMinutes(Stop stop) {

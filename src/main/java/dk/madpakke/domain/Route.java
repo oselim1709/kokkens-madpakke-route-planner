@@ -17,6 +17,9 @@ public class Route {
     // returned by the API, so it always reflects the current depot setting.
     private String googleMapsUrl;
 
+    // The assigned driver's end address, if any (not persisted — read from the driver).
+    private String endAddress;
+
     // How many of this route's stops are NOT covered by googleMapsUrl (Google Maps'
     // free directions link caps at 10 locations total including the start point).
     private int googleMapsExcludedStopCount;
@@ -75,6 +78,14 @@ public class Route {
 
     public void setStops(List<Stop> stops) {
         this.stops = stops;
+    }
+
+    public String getEndAddress() {
+        return endAddress;
+    }
+
+    public void setEndAddress(String endAddress) {
+        this.endAddress = endAddress;
     }
 
     public String getGoogleMapsUrl() {

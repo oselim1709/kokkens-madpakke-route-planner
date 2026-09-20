@@ -487,9 +487,54 @@ function renderDrivers() {
                 </label>
                 <button class="btn small danger" onclick="confirmThenRun(this, () => deleteDriver(${d.id}))">Slet</button>
             </div>
+            <div class="address-field" style="margin-top:10px;">
+                <label class="muted" for="end-addr-${d.id}">Slutadresse (valgfri) — hvor chaufføren afslutter ruten</label>
+                <input type="text" id="end-addr-${d.id}" value="${esc(d.endAddress || "")}" placeholder="Begynd at skrive adressen..." autocomplete="off">
+                <div class="address-suggestions" id="end-suggestions-${d.id}" hidden></div>
+                <div class="address-status ${d.endAddress ? (d.endGeocoded ? "ok" : "pending") : ""}" id="end-status-${d.id}">${d.endAddress ? (d.endGeocoded ? "✓ Adresse fundet" : "⚠ Adressen kunne ikke findes — vælg den fra listen") : ""}</div>
+                <div class="actions">
+                    <button class="btn small" onclick="saveDriverEnd(${d.id})">Gem slutadresse</button>
+                    ${d.endAddress ? `<button class="btn small ghost" onclick="clearDriverEnd(${d.id})">Fjern</button>` : ""}
+                </div>
+            </div>
         </div>
     `).join("");
+    state.drivers.forEach(d => {
+        const input = document.getElementById(`end-addr-${d.id}`);
+        attachAddressAutocomplete(input, document.getElementById(`end-suggestions-${d.id}`), candidate => {
+            driverEndCoords[d.id] = candidate ? { lat: candidate.lat, lon: candidate.lon } : null;
+            const status = document.getElementById(`end-status-${d.id}`);
+            status.className = "address-status" + (candidate ? " ok" : "");
+            status.textContent = candidate ? "✓ Adresse fundet — tryk Gem" : "";
+        });
+    });
 }
+
+// Coordinates of a suggestion picked for a driver's end address, until it is saved.
+const driverEndCoords = {};
+
+async function updateDriverEnd(id, address) {
+    const text = address !== undefined ? address : document.getElementById(`end-addr-${id}`).value.trim();
+    const coords = text ? driverEndCoords[id] : null;
+    const saved = await api(`/api/drivers/${id}/end`, {
+        method: "PUT",
+        body: JSON.stringify({ address: text, lat: coords ? coords.lat : null, lon: coords ? coords.lon : null }),
+    });
+    delete driverEndCoords[id];
+    const driver = state.drivers.find(d => d.id === id);
+    Object.assign(driver, saved);
+    renderDrivers();
+    if (!text) {
+        showToast("Slutadresse fjernet");
+    } else if (saved.endGeocoded) {
+        showToast("Slutadresse gemt — gælder næste gang du genererer ruter");
+    } else {
+        showToast("Adressen kunne ikke findes — vælg den fra listen");
+    }
+}
+
+window.saveDriverEnd = id => updateDriverEnd(id);
+window.clearDriverEnd = id => updateDriverEnd(id, "");
 
 window.toggleDriverActive = async function (id, active) {
     const driver = state.drivers.find(d => d.id === id);
@@ -544,6 +589,7 @@ document.getElementById("btn-generate").addEventListener("click", async () => {
 });
 
 function renderRoutes(skippedStops) {
+    state.lastSkipped = skippedStops || [];
     const warnBox = document.getElementById("route-warnings");
     if (skippedStops && skippedStops.length > 0) {
         warnBox.innerHTML = `<div class="card" style="border-color:#b3423a;">
@@ -608,13 +654,14 @@ function renderRoutes(skippedStops) {
                 <div>
                     <h3>Rute ${route.sequenceIndex + 1}</h3>
                     <div class="muted">Estimeret tid: ${formatMinutes(route.estimatedMinutes)}</div>
+                    ${route.endAddress ? `<div class="muted">🏁 Slutter: ${esc(route.endAddress)}</div>` : ""}
                 </div>
                 <select class="driver-select" onchange="assignDriver(${route.id}, this.value)">
                     ${driverOptions(route.driverId)}
                 </select>
             </div>
             ${totalsText ? `<div class="pack-summary"><strong>📦 Total til pakning:</strong> ${esc(totalsText)}</div>` : ""}
-            ${route.googleMapsExcludedStopCount > 0 ? `<div class="pack-summary" style="background:#fde8df; color:#a44d1e;">⚠ Google Maps kan kun tage 10 stop ad gangen. Linket dækker kun stop 1-${route.stops.length - route.googleMapsExcludedStopCount}. De sidste ${route.googleMapsExcludedStopCount} stop skal chaufføren navigere til manuelt.</div>` : ""}
+            ${route.googleMapsExcludedStopCount > 0 ? `<div class="pack-summary" style="background:#fde8df; color:#a44d1e;">⚠ Google Maps kan kun tage 10 stop ad gangen${route.endAddress ? " (startpunkt og slutadresse tæller med)" : ""}. Linket dækker kun stop 1-${route.stops.length - route.googleMapsExcludedStopCount}. De sidste ${route.googleMapsExcludedStopCount} stop skal chaufføren navigere til manuelt.</div>` : ""}
             ${stopsHtml}
             <div class="actions">
                 ${route.googleMapsUrl ? `<a class="btn small" href="${esc(route.googleMapsUrl)}" target="_blank" rel="noopener">🧭 Åbn i Google Maps</a>` : ""}
@@ -634,12 +681,9 @@ window.assignDriver = async function (routeId, driverIdRaw) {
     const driverId = driverIdRaw ? Number(driverIdRaw) : null;
     await api(`/api/routes/${routeId}/driver`, { method: "PUT", body: JSON.stringify({ driverId }) });
     showToast("Chauffør opdateret");
-    const route = state.routes.find(r => r.id === routeId);
-    if (route) {
-        const driver = state.drivers.find(d => d.id === driverId);
-        route.driverId = driverId;
-        route.driverName = driver ? driver.name : null;
-    }
+    // The new driver may have another end address, which changes the map link and the total time.
+    state.routes = await api("/api/routes/today");
+    renderRoutes(state.lastSkipped);
 };
 
 window.toggleRouteText = async function (routeId) {

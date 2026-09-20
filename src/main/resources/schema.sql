@@ -32,11 +32,19 @@ ALTER TABLE stop ADD COLUMN floor_door TEXT;
 CREATE TABLE IF NOT EXISTS driver (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
-    active INTEGER NOT NULL DEFAULT 1
+    active INTEGER NOT NULL DEFAULT 1,
+    end_address TEXT,
+    end_lat REAL,
+    end_lon REAL
 );
 
 -- Migration for databases created before driver.active existed (same trick as above).
 ALTER TABLE driver ADD COLUMN active INTEGER NOT NULL DEFAULT 1;
+
+-- Optional per-driver end address (where the driver finishes the route), same migration trick.
+ALTER TABLE driver ADD COLUMN end_address TEXT;
+ALTER TABLE driver ADD COLUMN end_lat REAL;
+ALTER TABLE driver ADD COLUMN end_lon REAL;
 
 CREATE TABLE IF NOT EXISTS route (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
