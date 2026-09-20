@@ -62,6 +62,14 @@ public class StopRepository {
         return jdbc.query("SELECT * FROM stop WHERE active = 1 ORDER BY id", MAPPER);
     }
 
+    public void setActive(long id, boolean active) {
+        jdbc.update("UPDATE stop SET active = ? WHERE id = ?", active ? 1 : 0, id);
+    }
+
+    public void setAllActive(boolean active) {
+        jdbc.update("UPDATE stop SET active = ?", active ? 1 : 0);
+    }
+
     public Optional<Stop> findById(long id) {
         List<Stop> result = jdbc.query("SELECT * FROM stop WHERE id = ?", MAPPER, id);
         return result.stream().findFirst();

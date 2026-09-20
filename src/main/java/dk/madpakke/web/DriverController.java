@@ -38,6 +38,11 @@ public class DriverController {
         driverRepository.update(id, body.get("name"));
     }
 
+    @PutMapping("/{id}/active")
+    public void setActive(@PathVariable long id, @RequestBody Map<String, Boolean> body) {
+        driverRepository.setActive(id, Boolean.TRUE.equals(body.get("active")));
+    }
+
     @DeleteMapping("/{id}")
     public void delete(@PathVariable long id) {
         driverRepository.delete(id);

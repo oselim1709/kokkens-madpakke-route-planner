@@ -167,11 +167,25 @@ async function loadStops() {
 
 function renderStops() {
     const container = document.getElementById("stop-list");
-    if (state.stops.length === 0) {
+    const total = state.stops.length;
+    const activeCount = state.stops.filter(s => s.active).length;
+    document.getElementById("stop-summary").textContent = total === 0
+        ? ""
+        : `${activeCount} af ${total} stops er valgt til dagens ruter.`;
+    document.getElementById("stop-controls").hidden = total === 0;
+    if (total === 0) {
         container.innerHTML = `<p class="empty">Ingen stops endnu. Tryk "+ Tilføj stop" for at komme i gang.</p>`;
         return;
     }
-    container.innerHTML = state.stops.map(stop => {
+    const query = document.getElementById("stop-search").value.trim().toLowerCase();
+    const visible = query
+        ? state.stops.filter(s => (s.customerName + " " + s.address).toLowerCase().includes(query))
+        : state.stops;
+    if (visible.length === 0) {
+        container.innerHTML = `<p class="empty">Ingen stops matcher "${esc(query)}".</p>`;
+        return;
+    }
+    container.innerHTML = visible.map(stop => {
         const items = ITEM_LABELS
             .map(([key, label]) => stop[key] > 0 ? `${stop[key]}x ${label}` : null)
             .filter(Boolean)
@@ -179,11 +193,14 @@ function renderStops() {
         const typeBadge = stop.stopType === "GYM"
             ? `<span class="badge gym">Gym</span>`
             : `<span class="badge private">Privat</span>`;
-        const activeBadge = stop.active ? "" : `<span class="badge inactive">Inaktiv</span>`;
         const deadline = stop.deadline ? ` · Deadline ${stop.deadline.substring(0, 5)}` : "";
         const preferredDriver = state.drivers.find(d => d.id === stop.preferredDriverId);
         return `
-        <div class="card stop-list-item">
+        <div class="card stop-list-item ${stop.active ? "" : "is-inactive"}">
+            <label class="active-toggle">
+                <input type="checkbox" ${stop.active ? "checked" : ""} onchange="toggleActive(${stop.id}, this.checked)">
+                <span>${stop.active ? "Med på dagens ruter" : "Ikke med i dag"}</span>
+            </label>
             <div class="row">
                 <div>
                     <h3>${esc(stop.customerName)}</h3>
@@ -191,13 +208,12 @@ function renderStops() {
                     ${!stop.geocoded ? `<div class="address-status pending">⚠ Adresse ikke fundet endnu — redigér og vælg fra listen</div>` : ""}
                     ${preferredDriver ? `<div class="muted">🚐 Foretrukken chauffør: ${esc(preferredDriver.name)}</div>` : ""}
                 </div>
-                <div>${typeBadge} ${activeBadge}</div>
+                <div>${typeBadge}</div>
             </div>
             ${items ? `<div class="items">${esc(items)}</div>` : ""}
             ${stop.specialOrder ? `<div class="muted items">Special: ${esc(stop.specialOrder)}</div>` : ""}
             <div class="actions">
                 <button class="btn small secondary" onclick="editStop(${stop.id})">Redigér</button>
-                <button class="btn small ${stop.active ? "ghost" : "secondary"}" onclick="toggleActive(${stop.id})">${stop.active ? "Sæt inaktiv" : "Sæt aktiv"}</button>
                 <button class="btn small danger" onclick="confirmThenRun(this, () => deleteStop(${stop.id}))">Slet</button>
             </div>
         </div>`;
@@ -277,12 +293,32 @@ window.editStop = function (id) {
     openStopModal(findStop(id));
 };
 
-window.toggleActive = async function (id) {
+window.toggleActive = async function (id, active) {
     const stop = findStop(id);
-    stop.active = !stop.active;
-    await api(`/api/stops/${id}`, { method: "PUT", body: JSON.stringify(stop) });
-    loadStops();
+    stop.active = active;
+    renderStops();
+    try {
+        await api(`/api/stops/${id}/active`, { method: "PUT", body: JSON.stringify({ active }) });
+    } catch (e) {
+        showToast(e.message);
+        loadStops();
+    }
 };
+
+async function setAllStopsActive(active) {
+    state.stops.forEach(s => { s.active = active; });
+    renderStops();
+    try {
+        await api("/api/stops/active", { method: "PUT", body: JSON.stringify({ active }) });
+    } catch (e) {
+        showToast(e.message);
+        loadStops();
+    }
+}
+
+document.getElementById("btn-stops-all").addEventListener("click", () => setAllStopsActive(true));
+document.getElementById("btn-stops-none").addEventListener("click", () => setAllStopsActive(false));
+document.getElementById("stop-search").addEventListener("input", renderStops);
 
 window.deleteStop = async function (id) {
     await api(`/api/stops/${id}`, { method: "DELETE" });
@@ -332,7 +368,8 @@ async function openStopModal(stop) {
     const driverSelect = document.getElementById("stop-driver");
     const preferredId = stop ? stop.preferredDriverId : null;
     driverSelect.innerHTML = `<option value="">Automatisk (fordeles ved generering)</option>`
-        + state.drivers.map(d => `<option value="${d.id}" ${d.id === preferredId ? "selected" : ""}>${esc(d.name)}</option>`).join("");
+        + state.drivers.filter(d => d.active || d.id === preferredId)
+            .map(d => `<option value="${d.id}" ${d.id === preferredId ? "selected" : ""}>${esc(d.name)}${d.active ? "" : " (ikke med i dag)"}</option>`).join("");
 
     document.getElementById("qty-normal").value = stop ? stop.qtyNormalLunchbox : 0;
     document.getElementById("qty-fitness").value = stop ? stop.qtyFitnessLunchbox : 0;
@@ -416,15 +453,32 @@ function renderDrivers() {
         container.innerHTML = `<p class="empty">Ingen chauffører tilføjet endnu.</p>`;
         return;
     }
-    container.innerHTML = state.drivers.map(d => `
-        <div class="card">
+    const activeCount = state.drivers.filter(d => d.active).length;
+    container.innerHTML = `<p class="muted" style="margin:0 2px 8px;">${activeCount} af ${state.drivers.length} chauffører kører i dag.</p>`
+        + state.drivers.map(d => `
+        <div class="card ${d.active ? "" : "is-inactive"}">
             <div class="row">
-                <div>${esc(d.name)}</div>
+                <label class="active-toggle" style="margin:0;">
+                    <input type="checkbox" ${d.active ? "checked" : ""} onchange="toggleDriverActive(${d.id}, this.checked)">
+                    <span><strong>${esc(d.name)}</strong> · ${d.active ? "Kører i dag" : "Ikke med i dag"}</span>
+                </label>
                 <button class="btn small danger" onclick="confirmThenRun(this, () => deleteDriver(${d.id}))">Slet</button>
             </div>
         </div>
     `).join("");
 }
+
+window.toggleDriverActive = async function (id, active) {
+    const driver = state.drivers.find(d => d.id === id);
+    driver.active = active;
+    renderDrivers();
+    try {
+        await api(`/api/drivers/${id}/active`, { method: "PUT", body: JSON.stringify({ active }) });
+    } catch (e) {
+        showToast(e.message);
+        loadDrivers();
+    }
+};
 
 document.getElementById("btn-add-driver").addEventListener("click", async () => {
     const input = document.getElementById("new-driver-name");
@@ -486,7 +540,7 @@ function renderRoutes(skippedStops) {
 
     const driverOptions = (selectedId) => {
         const opts = [`<option value="">Ikke tildelt</option>`];
-        for (const d of state.drivers) {
+        for (const d of state.drivers.filter(d => d.active || d.id === selectedId)) {
             opts.push(`<option value="${d.id}" ${d.id === selectedId ? "selected" : ""}>${esc(d.name)}</option>`);
         }
         return opts.join("");

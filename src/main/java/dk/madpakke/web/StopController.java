@@ -3,6 +3,7 @@ package dk.madpakke.web;
 import dk.madpakke.domain.Stop;
 import dk.madpakke.repository.StopRepository;
 import java.util.List;
+import java.util.Map;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -50,6 +51,20 @@ public class StopController {
             stopRepository.update(stop);
             return ResponseEntity.ok(stop);
         }).orElse(ResponseEntity.notFound().build());
+    }
+
+    /** Quick on/off for one stop ("with in today's routes"), without touching its other data. */
+    @PutMapping("/{id}/active")
+    public ResponseEntity<Void> setActive(@PathVariable long id, @RequestBody Map<String, Boolean> body) {
+        stopRepository.setActive(id, Boolean.TRUE.equals(body.get("active")));
+        return ResponseEntity.noContent().build();
+    }
+
+    /** Select all / deselect all. */
+    @PutMapping("/active")
+    public ResponseEntity<Void> setAllActive(@RequestBody Map<String, Boolean> body) {
+        stopRepository.setAllActive(Boolean.TRUE.equals(body.get("active")));
+        return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/{id}")

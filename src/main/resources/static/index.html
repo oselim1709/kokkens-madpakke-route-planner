@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Kokkens Madpakke Route Planner</title>
-<link rel="stylesheet" href="style.css?v=11">
+<link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
 
@@ -36,6 +36,15 @@
             <h2>Stops</h2>
             <button class="btn small" id="btn-add-stop">+ Tilføj stop</button>
         </div>
+        <div class="card" id="stop-controls">
+            <p class="muted" style="margin-bottom:8px;">Alle stops gemmes fast. Sæt hak ved dem, der skal med på dagens ruter — og tilføj nye ved behov.</p>
+            <input type="search" id="stop-search" placeholder="Søg på navn eller adresse..." autocomplete="off">
+            <div class="actions">
+                <button class="btn small secondary" id="btn-stops-all">Vælg alle</button>
+                <button class="btn small ghost" id="btn-stops-none">Fravælg alle</button>
+            </div>
+            <p class="muted" id="stop-summary" style="margin-top:8px;"></p>
+        </div>
         <div id="stop-list"></div>
     </section>
 
@@ -59,6 +68,7 @@
                 <input type="text" id="new-driver-name" placeholder="Navn på chauffør">
                 <button class="btn small" id="btn-add-driver">Tilføj</button>
             </div>
+            <p class="muted" style="margin-top:8px;">Chauffører gemmes fast. Sæt hak ved dem, der kører i dag — kun dem får en rute.</p>
         </div>
         <div id="driver-list"></div>
     </section>
@@ -153,7 +163,7 @@
         </div>
         <div class="card">
             <h3 style="color:var(--danger);">Nulstil alt</h3>
-            <p class="muted">Sletter ALLE stops og ALLE ruter permanent. Brug det til at starte helt forfra. Kan ikke fortrydes.</p>
+            <p class="muted">Sletter ALLE gemte stops og ALLE ruter permanent. Vil du bare starte en ny dag, så brug i stedet "Fravælg alle" under Stops. Kan ikke fortrydes.</p>
             <button class="btn danger full" id="btn-reset-all">Nulstil alle stop og ruter</button>
         </div>
     </section>
@@ -260,6 +270,6 @@
     </div>
 </div>
 
-<script src="app.js?v=11"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>

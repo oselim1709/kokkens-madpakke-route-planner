@@ -114,7 +114,8 @@ public class RouteGenerationService {
             return new RouteGenerationResult(List.of(), skipped);
         }
 
-        List<Driver> drivers = driverRepository.findAll();
+        // Only drivers switched on for the day get routes; stops pinned to an inactive driver are spread like unpinned ones.
+        List<Driver> drivers = driverRepository.findActive();
         String depotAddress = settingsService.getDepotAddress();
         TravelTimeMatrix travelTimes = TravelTimeMatrix.build(depot, geocodable, routingService, avgSpeedKmh);
 

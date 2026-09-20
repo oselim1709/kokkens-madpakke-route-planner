@@ -26,8 +26,12 @@ ALTER TABLE stop ADD COLUMN preferred_driver_id INTEGER REFERENCES driver(id) ON
 
 CREATE TABLE IF NOT EXISTS driver (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL
+    name TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1
 );
+
+-- Migration for databases created before driver.active existed (same trick as above).
+ALTER TABLE driver ADD COLUMN active INTEGER NOT NULL DEFAULT 1;
 
 CREATE TABLE IF NOT EXISTS route (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
