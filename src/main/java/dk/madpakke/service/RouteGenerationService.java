@@ -34,19 +34,36 @@ import org.springframework.stereotype.Service;
  *     contiguous angular slice keeps each route geographically coherent to start.
  *     When some stops ARE pinned, the remaining unpinned stops are instead handed one
  *     at a time to whichever driver currently has the least committed time.
- *  4. A rebalancing pass then moves individual (unpinned) stops from the currently
- *     busiest route to the lightest one, using the real driving-time totals, as long
- *     as that actually shrinks the gap — this is what corrects the cases where the
- *     initial geography-based split guessed wrong (a route that looked compact on a
- *     map can still be slower in real traffic/roads than a route that looked spread out).
- *  5. Inside each route, stops with a delivery deadline go first (earliest deadline
+ *  4. A "does this stop actually belong here" pass then moves any unpinned stop to a
+ *     different driver's route whenever that route can pick it up for clearly less extra
+ *     driving than its current route spends reaching it — regardless of the overall time
+ *     split between drivers. This is what fixes the angle-sweep's boundary mistakes: a
+ *     stop can be geographically right next to another driver's stops, yet fall just on
+ *     the wrong side of the angular cut in step 3.
+ *  5. Only once that's settled does a second pass step in to fix a genuinely lopsided time
+ *     split (one driver ending up with much more driving than the other) — it only moves a
+ *     stop when doing so actually narrows the gap, and only while the gap is large; a
+ *     moderate difference in route length is expected and left alone, since routes cover
+ *     different areas and aren't going to take equally long.
+ *  6. Inside each route, stops with a delivery deadline go first (earliest deadline
  *     first); the rest are ordered with a nearest-neighbour walk using real driving times.
  */
 @Service
 public class RouteGenerationService {
 
     private static final int MAX_REBALANCE_MOVES = 12;
-    private static final double REBALANCE_THRESHOLD_MINUTES = 15;
+    // A gap this size (or smaller) between drivers' route lengths is left alone — routes cover
+    // different areas, so they aren't going to take equally long, and forcing them closer than
+    // this tends to do it by relocating a stop to a route it doesn't geographically belong on
+    // (undoing what reassignMisplacedStops just fixed). This pass only exists as a safety net
+    // for a genuinely lopsided split, not to fine-tune an already-sensible difference.
+    private static final double REBALANCE_THRESHOLD_MINUTES = 60;
+
+    private static final int MAX_REASSIGN_MOVES = 20;
+    // How much a move has to clearly save (the driving time it removes from one route minus
+    // what it adds to the other) before it's worth relocating a stop for. Keeps the pass from
+    // shuffling stops back and forth over a one- or two-minute difference.
+    private static final double MIN_REASSIGN_SAVINGS_MINUTES = 5;
 
     private final StopRepository stopRepository;
     private final DriverRepository driverRepository;
@@ -147,6 +164,7 @@ public class RouteGenerationService {
             List<Stop> swept = sweepByAngle(geocodable, depot);
             List<List<Stop>> buckets = splitIntoBalancedGroups(swept, numRoutes);
             List<Route> routes = buildRoutesFromBuckets(buckets, drivers, travelTimes, depotAddress, today);
+            reassignMisplacedStops(routes, drivers, travelTimes, depotAddress);
             rebalanceByRealTime(routes, drivers, travelTimes, depotAddress);
             return routes;
         }
@@ -200,6 +218,7 @@ public class RouteGenerationService {
             applyStops(route, ordered, driver, travelTimes, depotAddress);
             routes.add(route);
         }
+        reassignMisplacedStops(routes, drivers, travelTimes, depotAddress);
         rebalanceByRealTime(routes, drivers, travelTimes, depotAddress);
         return routes;
     }
@@ -226,6 +245,79 @@ public class RouteGenerationService {
             routes.add(route);
         }
         return routes;
+    }
+
+    /**
+     * Moves a stop to a different driver's route whenever that route can pick it up for clearly
+     * less extra driving than its current route spends reaching it, regardless of the current
+     * time split between drivers — this is a geography/efficiency fix, not a fairness one.
+     *
+     * For every candidate move, "cost" is measured as the actual change in that route's total
+     * driving time with the stop optimally re-ordered in (or out), not just distance to its
+     * neighbours — so it accounts for the detour the stop causes right where it currently sits.
+     * Repeats picking the single best remaining move each round until no move clearly helps,
+     * never empties a route, and never moves a stop pinned to its current driver.
+     */
+    private void reassignMisplacedStops(List<Route> routes, List<Driver> drivers, TravelTimeMatrix travelTimes,
+                                         String depotAddress) {
+        if (routes.size() < 2) {
+            return;
+        }
+        Map<Long, Driver> driversById = drivers.stream().collect(Collectors.toMap(Driver::getId, d -> d));
+        for (int iteration = 0; iteration < MAX_REASSIGN_MOVES; iteration++) {
+            Route bestFrom = null;
+            Route bestTo = null;
+            double bestSavings = MIN_REASSIGN_SAVINGS_MINUTES;
+            List<Stop> bestFromOrdered = null;
+            List<Stop> bestToOrdered = null;
+
+            for (Route from : routes) {
+                if (from.getStops().size() <= 1) {
+                    continue;
+                }
+                GeocodeResult fromEnd = endPointOf(driversById.get(from.getDriverId()));
+                double fromMinutes = estimateRouteMinutes(from.getStops(), travelTimes, fromEnd);
+
+                for (Stop candidate : from.getStops()) {
+                    if (isPinnedToRoute(candidate, from)) {
+                        continue;
+                    }
+                    List<Stop> withoutCandidate = new ArrayList<>(from.getStops());
+                    withoutCandidate.remove(candidate);
+                    List<Stop> fromOrdered = orderStops(withoutCandidate, travelTimes);
+                    // What removing the candidate saves route "from" — its current detour cost.
+                    double removalSavings = fromMinutes - estimateRouteMinutes(fromOrdered, travelTimes, fromEnd);
+
+                    for (Route to : routes) {
+                        if (to == from) {
+                            continue;
+                        }
+                        GeocodeResult toEnd = endPointOf(driversById.get(to.getDriverId()));
+                        double toMinutes = estimateRouteMinutes(to.getStops(), travelTimes, toEnd);
+                        List<Stop> withCandidate = new ArrayList<>(to.getStops());
+                        withCandidate.add(candidate);
+                        List<Stop> toOrdered = orderStops(withCandidate, travelTimes);
+                        // What adding the candidate costs route "to" at its cheapest insertion point.
+                        double insertionCost = estimateRouteMinutes(toOrdered, travelTimes, toEnd) - toMinutes;
+
+                        double savings = removalSavings - insertionCost;
+                        if (savings > bestSavings) {
+                            bestSavings = savings;
+                            bestFrom = from;
+                            bestTo = to;
+                            bestFromOrdered = fromOrdered;
+                            bestToOrdered = toOrdered;
+                        }
+                    }
+                }
+            }
+
+            if (bestFrom == null) {
+                return;
+            }
+            applyStops(bestFrom, bestFromOrdered, driversById.get(bestFrom.getDriverId()), travelTimes, depotAddress);
+            applyStops(bestTo, bestToOrdered, driversById.get(bestTo.getDriverId()), travelTimes, depotAddress);
+        }
     }
 
     /**
