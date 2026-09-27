@@ -108,6 +108,9 @@ public class RouteController {
         if (!currentStopIds.equals(givenStopIds)) {
             return ResponseEntity.badRequest().body(Map.of("error", "Skal indeholde præcis de samme stops som ruterne har nu, hvert stop én gang."));
         }
+        if (layout.routes().stream().anyMatch(r -> r.stopIds().isEmpty())) {
+            return ResponseEntity.badRequest().body(Map.of("error", "En rute kan ikke stå helt tom — flyt i stedet det sidste stop tilbage, eller sæt chaufføren inaktiv."));
+        }
         routeRepository.replaceStops(layout.routes().stream()
             .collect(Collectors.toMap(RouteStops::routeId, RouteStops::stopIds, (a, b) -> a, LinkedHashMap::new)));
         // Times depend on the stops and their order, so recompute them for the drivers' routes.

@@ -637,14 +637,17 @@ function renderRoutes(skippedStops) {
                 : `<span class="badge private">Privat</span>`;
             const deadline = stop.deadline ? ` · Deadline ${stop.deadline.substring(0, 5)}` : "";
             return `
-                <div style="padding:8px 0; border-top:1px solid var(--border);">
-                    <div class="row">
-                        <strong>${i + 1}. ${esc(stop.customerName)}</strong>
-                        ${typeBadge}
+                <div class="route-stop" data-stop-id="${stop.id}">
+                    <div class="drag-handle" title="Træk for at flytte stoppet">⠿</div>
+                    <div class="route-stop-body">
+                        <div class="row">
+                            <strong class="stop-order">${i + 1}. ${esc(stop.customerName)}</strong>
+                            ${typeBadge}
+                        </div>
+                        <div class="muted">${esc(stop.address)}${stop.floorDoor ? ` · <strong>Etage/dør: ${esc(stop.floorDoor)}</strong>` : ""}${deadline}</div>
+                        ${items ? `<div class="items">${esc(items)}</div>` : ""}
+                        ${stop.specialOrder ? `<div class="muted items">Special: ${esc(stop.specialOrder)}</div>` : ""}
                     </div>
-                    <div class="muted">${esc(stop.address)}${stop.floorDoor ? ` · <strong>Etage/dør: ${esc(stop.floorDoor)}</strong>` : ""}${deadline}</div>
-                    ${items ? `<div class="items">${esc(items)}</div>` : ""}
-                    ${stop.specialOrder ? `<div class="muted items">Special: ${esc(stop.specialOrder)}</div>` : ""}
                 </div>`;
         }).join("");
 
@@ -662,7 +665,8 @@ function renderRoutes(skippedStops) {
             </div>
             ${totalsText ? `<div class="pack-summary"><strong>📦 Total til pakning:</strong> ${esc(totalsText)}</div>` : ""}
             ${route.googleMapsExcludedStopCount > 0 ? `<div class="pack-summary" style="background:#fde8df; color:#a44d1e;">⚠ Google Maps kan kun tage 10 stop ad gangen${route.endAddress ? " (startpunkt og slutadresse tæller med)" : ""}. Linket dækker kun stop 1-${route.stops.length - route.googleMapsExcludedStopCount}. De sidste ${route.googleMapsExcludedStopCount} stop skal chaufføren navigere til manuelt.</div>` : ""}
-            ${stopsHtml}
+            <p class="muted" style="margin:8px 0 2px;">Træk i <strong>⠿</strong> for at ændre rækkefølgen, eller flytte et stop til den anden rute.</p>
+            <div class="route-stops-list" data-route-id="${route.id}">${stopsHtml}</div>
             <div class="actions">
                 ${route.googleMapsUrl ? `<a class="btn small" href="${esc(route.googleMapsUrl)}" target="_blank" rel="noopener">🧭 Åbn i Google Maps</a>` : ""}
                 <button class="btn small secondary" onclick="toggleRouteText(${route.id})">Vis/kopiér tekst</button>
@@ -675,6 +679,70 @@ function renderRoutes(skippedStops) {
             </div>
         </div>`;
     }).join("");
+    initRouteSortables();
+}
+
+// ---------- Drag-and-drop reordering of stops within/between routes ----------
+
+let routeSortables = [];
+
+function initRouteSortables() {
+    routeSortables.forEach(s => s.destroy());
+    routeSortables = [];
+    if (typeof Sortable === "undefined") return; // e.g. offline — the page still works, just without drag reorder
+    document.querySelectorAll(".route-stops-list").forEach(list => {
+        routeSortables.push(new Sortable(list, {
+            group: "route-stops",
+            handle: ".drag-handle",
+            animation: 150,
+            delay: 0,
+            forceFallback: true, // consistent pointer-based dragging on both touch and mouse
+            fallbackTolerance: 3,
+            ghostClass: "route-stop-ghost",
+            chosenClass: "route-stop-chosen",
+            dragClass: "route-stop-dragging",
+            onEnd: onStopsReordered,
+        }));
+    });
+}
+
+// Coalesces onEnd events that fire in quick succession (e.g. two drag gestures overlapping)
+// into one save using the latest DOM order, instead of racing two requests against each other.
+const reorderState = { inFlight: false, pending: false };
+
+async function onStopsReordered() {
+    if (reorderState.inFlight) {
+        reorderState.pending = true;
+        return;
+    }
+    reorderState.inFlight = true;
+    do {
+        reorderState.pending = false;
+        await saveCurrentRouteLayout();
+    } while (reorderState.pending);
+    reorderState.inFlight = false;
+}
+
+async function saveCurrentRouteLayout() {
+    const layout = [...document.querySelectorAll(".route-stops-list")].map(list => ({
+        routeId: Number(list.dataset.routeId),
+        stopIds: [...list.querySelectorAll(".route-stop")].map(el => Number(el.dataset.stopId)),
+    }));
+    // A route left with zero stops isn't allowed by the layout endpoint (and makes no sense) —
+    // undo instead of sending a request we know will fail.
+    if (layout.some(r => r.stopIds.length === 0)) {
+        showToast("En rute kan ikke stå helt tom");
+        renderRoutes(state.lastSkipped);
+        return;
+    }
+    try {
+        state.routes = await api("/api/routes/layout", { method: "PUT", body: JSON.stringify({ routes: layout }) });
+        showToast("Rækkefølge gemt");
+    } catch (e) {
+        showToast(e.message);
+        state.routes = await api("/api/routes/today");
+    }
+    renderRoutes(state.lastSkipped);
 }
 
 window.assignDriver = async function (routeId, driverIdRaw) {
