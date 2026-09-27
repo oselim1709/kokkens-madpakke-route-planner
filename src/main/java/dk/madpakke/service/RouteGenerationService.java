@@ -34,30 +34,20 @@ import org.springframework.stereotype.Service;
  *     contiguous angular slice keeps each route geographically coherent to start.
  *     When some stops ARE pinned, the remaining unpinned stops are instead handed one
  *     at a time to whichever driver currently has the least committed time.
- *  4. A "does this stop actually belong here" pass then moves any unpinned stop to a
- *     different driver's route whenever that route can pick it up for clearly less extra
- *     driving than its current route spends reaching it — regardless of the overall time
- *     split between drivers. This is what fixes the angle-sweep's boundary mistakes: a
- *     stop can be geographically right next to another driver's stops, yet fall just on
- *     the wrong side of the angular cut in step 3.
- *  5. Only once that's settled does a second pass step in to fix a genuinely lopsided time
- *     split (one driver ending up with much more driving than the other) — it only moves a
- *     stop when doing so actually narrows the gap, and only while the gap is large; a
- *     moderate difference in route length is expected and left alone, since routes cover
- *     different areas and aren't going to take equally long.
- *  6. Inside each route, stops with a delivery deadline go first (earliest deadline
+ *  4. A "does this stop actually belong here" pass then moves any unpinned, non-deadline stop
+ *     to a different driver's route whenever that route can pick it up for clearly less extra
+ *     driving than its current route spends reaching it — the real detour its immediate
+ *     neighbours (or the depot / the driver's end address) cause, not a full re-walk of the
+ *     route. This is what fixes the angle-sweep's boundary mistakes: a stop can be
+ *     geographically right next to another driver's stops, yet fall just on the wrong side of
+ *     the angular cut in step 3. It only moves a stop for a clear efficiency win — it does not
+ *     try to equalize the total time between drivers, so one route ending up longer than
+ *     another is expected and left alone as long as it makes sense on the map.
+ *  5. Inside each route, stops with a delivery deadline go first (earliest deadline
  *     first); the rest are ordered with a nearest-neighbour walk using real driving times.
  */
 @Service
 public class RouteGenerationService {
-
-    private static final int MAX_REBALANCE_MOVES = 12;
-    // A gap this size (or smaller) between drivers' route lengths is left alone — routes cover
-    // different areas, so they aren't going to take equally long, and forcing them closer than
-    // this tends to do it by relocating a stop to a route it doesn't geographically belong on
-    // (undoing what reassignMisplacedStops just fixed). This pass only exists as a safety net
-    // for a genuinely lopsided split, not to fine-tune an already-sensible difference.
-    private static final double REBALANCE_THRESHOLD_MINUTES = 60;
 
     private static final int MAX_REASSIGN_MOVES = 20;
     // How much a move has to clearly save (the driving time it removes from one route minus
@@ -165,7 +155,6 @@ public class RouteGenerationService {
             List<List<Stop>> buckets = splitIntoBalancedGroups(swept, numRoutes);
             List<Route> routes = buildRoutesFromBuckets(buckets, drivers, travelTimes, depotAddress, today);
             reassignMisplacedStops(routes, drivers, travelTimes, depotAddress);
-            rebalanceByRealTime(routes, drivers, travelTimes, depotAddress);
             return routes;
         }
 
@@ -219,7 +208,6 @@ public class RouteGenerationService {
             routes.add(route);
         }
         reassignMisplacedStops(routes, drivers, travelTimes, depotAddress);
-        rebalanceByRealTime(routes, drivers, travelTimes, depotAddress);
         return routes;
     }
 
@@ -267,46 +255,48 @@ public class RouteGenerationService {
         for (int iteration = 0; iteration < MAX_REASSIGN_MOVES; iteration++) {
             Route bestFrom = null;
             Route bestTo = null;
+            Stop bestCandidate = null;
+            int bestPosition = 0;
             double bestSavings = MIN_REASSIGN_SAVINGS_MINUTES;
-            List<Stop> bestFromOrdered = null;
-            List<Stop> bestToOrdered = null;
 
             for (Route from : routes) {
-                if (from.getStops().size() <= 1) {
+                List<Stop> fromStops = from.getStops();
+                if (fromStops.size() <= 1) {
                     continue;
                 }
                 GeocodeResult fromEnd = endPointOf(driversById.get(from.getDriverId()));
-                double fromMinutes = estimateRouteMinutes(from.getStops(), travelTimes, fromEnd);
 
-                for (Stop candidate : from.getStops()) {
-                    if (isPinnedToRoute(candidate, from)) {
+                for (int i = 0; i < fromStops.size(); i++) {
+                    Stop candidate = fromStops.get(i);
+                    // Deadline stops keep the position the deadline-first ordering gave them; moving
+                    // them would need to respect that ordering in the target route too, which this
+                    // pass doesn't reason about. Geographic misplacement is a non-deadline-stop problem.
+                    if (candidate.getDeadline() != null || isPinnedToRoute(candidate, from)) {
                         continue;
                     }
-                    List<Stop> withoutCandidate = new ArrayList<>(from.getStops());
-                    withoutCandidate.remove(candidate);
-                    List<Stop> fromOrdered = orderStops(withoutCandidate, travelTimes);
-                    // What removing the candidate saves route "from" — its current detour cost.
-                    double removalSavings = fromMinutes - estimateRouteMinutes(fromOrdered, travelTimes, fromEnd);
+                    List<Stop> fromWithout = new ArrayList<>(fromStops);
+                    fromWithout.remove(i);
+                    // The real detour this stop currently costs "from" — what removing it would save.
+                    double removalSavings = insertionCost(fromWithout, i, candidate, travelTimes, fromEnd);
 
                     for (Route to : routes) {
                         if (to == from) {
                             continue;
                         }
+                        List<Stop> toStops = to.getStops();
                         GeocodeResult toEnd = endPointOf(driversById.get(to.getDriverId()));
-                        double toMinutes = estimateRouteMinutes(to.getStops(), travelTimes, toEnd);
-                        List<Stop> withCandidate = new ArrayList<>(to.getStops());
-                        withCandidate.add(candidate);
-                        List<Stop> toOrdered = orderStops(withCandidate, travelTimes);
-                        // What adding the candidate costs route "to" at its cheapest insertion point.
-                        double insertionCost = estimateRouteMinutes(toOrdered, travelTimes, toEnd) - toMinutes;
-
-                        double savings = removalSavings - insertionCost;
-                        if (savings > bestSavings) {
-                            bestSavings = savings;
-                            bestFrom = from;
-                            bestTo = to;
-                            bestFromOrdered = fromOrdered;
-                            bestToOrdered = toOrdered;
+                        // Never insert ahead of "to"'s own deadline stops — they must stay first, in order.
+                        int deadlineCount = (int) toStops.stream().filter(s -> s.getDeadline() != null).count();
+                        for (int pos = deadlineCount; pos <= toStops.size(); pos++) {
+                            double cost = insertionCost(toStops, pos, candidate, travelTimes, toEnd);
+                            double savings = removalSavings - cost;
+                            if (savings > bestSavings) {
+                                bestSavings = savings;
+                                bestFrom = from;
+                                bestTo = to;
+                                bestCandidate = candidate;
+                                bestPosition = pos;
+                            }
                         }
                     }
                 }
@@ -315,80 +305,38 @@ public class RouteGenerationService {
             if (bestFrom == null) {
                 return;
             }
-            applyStops(bestFrom, bestFromOrdered, driversById.get(bestFrom.getDriverId()), travelTimes, depotAddress);
-            applyStops(bestTo, bestToOrdered, driversById.get(bestTo.getDriverId()), travelTimes, depotAddress);
+            List<Stop> newFromStops = new ArrayList<>(bestFrom.getStops());
+            newFromStops.remove(bestCandidate);
+            List<Stop> newToStops = new ArrayList<>(bestTo.getStops());
+            newToStops.add(bestPosition, bestCandidate);
+            applyStops(bestFrom, newFromStops, driversById.get(bestFrom.getDriverId()), travelTimes, depotAddress);
+            applyStops(bestTo, newToStops, driversById.get(bestTo.getDriverId()), travelTimes, depotAddress);
         }
     }
 
     /**
-     * Greedily moves one stop at a time from the currently slowest route to the fastest,
-     * using real driving times, whenever that actually shrinks the gap between them.
-     * Never moves a stop that's pinned to the route's own driver, and never fully empties
-     * a route. Stops once the gap is small enough or no further move helps.
+     * The real extra driving time a route incurs by having {@code candidate} sit at {@code gapIndex}
+     * within {@code stopsWithoutCandidate} (which must not already contain it) — i.e. the detour
+     * caused by its immediate neighbours there (or the depot / the driver's end address, at either
+     * end of the route), compared to skipping straight past that gap.
      */
-    private void rebalanceByRealTime(List<Route> routes, List<Driver> drivers, TravelTimeMatrix travelTimes,
-                                      String depotAddress) {
-        if (routes.size() < 2) {
-            return;
+    private double insertionCost(List<Stop> stopsWithoutCandidate, int gapIndex, Stop candidate,
+                                  TravelTimeMatrix travelTimes, GeocodeResult end) {
+        Stop prevStop = gapIndex > 0 ? stopsWithoutCandidate.get(gapIndex - 1) : null;
+        Stop nextStop = gapIndex < stopsWithoutCandidate.size() ? stopsWithoutCandidate.get(gapIndex) : null;
+
+        double toCandidate = prevStop == null ? travelTimes.fromDepot(candidate) : travelTimes.between(prevStop, candidate);
+        double fromCandidate = nextStop != null ? travelTimes.between(candidate, nextStop)
+            : (end != null ? travelTimes.toEnd(candidate, end) : 0);
+
+        double direct;
+        if (prevStop != null) {
+            direct = nextStop != null ? travelTimes.between(prevStop, nextStop)
+                : (end != null ? travelTimes.toEnd(prevStop, end) : 0);
+        } else {
+            direct = nextStop != null ? travelTimes.fromDepot(nextStop) : 0;
         }
-        Map<Long, Driver> driversById = drivers.stream().collect(Collectors.toMap(Driver::getId, d -> d));
-        for (int iteration = 0; iteration < MAX_REBALANCE_MOVES; iteration++) {
-            Route heaviest = routes.stream().max(Comparator.comparingDouble(Route::getEstimatedMinutes)).orElseThrow();
-            Route lightest = routes.stream()
-                .filter(r -> r != heaviest)
-                .min(Comparator.comparingDouble(Route::getEstimatedMinutes))
-                .orElse(null);
-            if (lightest == null) {
-                return;
-            }
-            double currentGap = heaviest.getEstimatedMinutes() - lightest.getEstimatedMinutes();
-            if (currentGap < REBALANCE_THRESHOLD_MINUTES) {
-                return;
-            }
-
-            Stop bestCandidate = null;
-            double bestGap = currentGap;
-            List<Stop> bestHeavyOrdered = null;
-            List<Stop> bestLightOrdered = null;
-            double bestHeavyMinutes = 0;
-            double bestLightMinutes = 0;
-
-            if (heaviest.getStops().size() > 1) {
-                for (Stop candidate : heaviest.getStops()) {
-                    if (isPinnedToRoute(candidate, heaviest)) {
-                        continue;
-                    }
-                    List<Stop> newHeavyStops = new ArrayList<>(heaviest.getStops());
-                    newHeavyStops.remove(candidate);
-                    List<Stop> newLightStops = new ArrayList<>(lightest.getStops());
-                    newLightStops.add(candidate);
-
-                    List<Stop> heavyOrdered = orderStops(newHeavyStops, travelTimes);
-                    List<Stop> lightOrdered = orderStops(newLightStops, travelTimes);
-                    double heavyMinutes = estimateRouteMinutes(heavyOrdered, travelTimes,
-                        endPointOf(driversById.get(heaviest.getDriverId())));
-                    double lightMinutes = estimateRouteMinutes(lightOrdered, travelTimes,
-                        endPointOf(driversById.get(lightest.getDriverId())));
-                    double newGap = Math.abs(heavyMinutes - lightMinutes);
-
-                    if (newGap < bestGap) {
-                        bestGap = newGap;
-                        bestCandidate = candidate;
-                        bestHeavyOrdered = heavyOrdered;
-                        bestLightOrdered = lightOrdered;
-                        bestHeavyMinutes = heavyMinutes;
-                        bestLightMinutes = lightMinutes;
-                    }
-                }
-            }
-
-            if (bestCandidate == null) {
-                return;
-            }
-
-            applyStops(heaviest, bestHeavyOrdered, driversById.get(heaviest.getDriverId()), travelTimes, depotAddress);
-            applyStops(lightest, bestLightOrdered, driversById.get(lightest.getDriverId()), travelTimes, depotAddress);
-        }
+        return toCandidate + fromCandidate - direct;
     }
 
     private boolean isPinnedToRoute(Stop stop, Route route) {
