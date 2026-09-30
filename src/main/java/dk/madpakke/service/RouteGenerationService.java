@@ -28,12 +28,16 @@ import org.springframework.stereotype.Service;
  *  2. Fetch real road-network driving times between the depot and every stop (OSRM),
  *     falling back to straight-line distance × an assumed speed for anything it
  *     couldn't resolve — see {@link TravelTimeMatrix}.
- *  3. If a stop was pinned to a specific driver, it always ends up on that driver's
- *     route. Otherwise, stops are swept by compass angle around the depot and split
- *     into contiguous, roughly on-site-time-balanced groups (one per driver) — a
- *     contiguous angular slice keeps each route geographically coherent to start.
- *     When some stops ARE pinned, the remaining unpinned stops are instead handed one
- *     at a time to whichever driver currently has the least committed time.
+ *  3. If a stop was pinned to a specific driver, it always ends up on that driver's route,
+ *     inserted wherever it causes the least extra driving (see step 5). Otherwise, with no
+ *     pins at all, stops are swept by compass angle around the depot and split into
+ *     contiguous, roughly on-site-time-balanced groups (one per driver) — a contiguous
+ *     angular slice keeps each route geographically coherent to start. When some stops ARE
+ *     pinned, the remaining unpinned stops are instead each inserted into whichever driver's
+ *     route — and which position in it — actually costs the least extra real driving time,
+ *     one stop at a time. This replaces handing them out by a rough per-stop time guess that
+ *     ignored geography entirely and could load up one driver with a whole cluster of
+ *     far-flung stops while the other sat underloaded.
  *  4. A "does this stop actually belong here" pass then moves any unpinned, non-deadline stop
  *     to a different driver's route whenever that route can pick it up for clearly less extra
  *     driving than its current route spends reaching it — the real detour its immediate
@@ -43,8 +47,12 @@ import org.springframework.stereotype.Service;
  *     the angular cut in step 3. It only moves a stop for a clear efficiency win — it does not
  *     try to equalize the total time between drivers, so one route ending up longer than
  *     another is expected and left alone as long as it makes sense on the map.
- *  5. Inside each route, stops with a delivery deadline go first (earliest deadline
- *     first); the rest are ordered with a nearest-neighbour walk using real driving times.
+ *  5. Inside each route, stops with a delivery deadline are placed in ascending-deadline order —
+ *     the one thing that's never reshuffled. Every other stop is inserted wherever it causes the
+ *     least extra driving, which may be before, between or after the deadline stops, not forced
+ *     to come after all of them. Always visiting every deadline stop first made sense for an
+ *     urgent same-morning cutoff, but produced a needless detour for a routine end-of-day one
+ *     hours out — the earlier scheme cost one real route ~20 minutes for exactly that reason.
  */
 @Service
 public class RouteGenerationService {
@@ -159,36 +167,85 @@ public class RouteGenerationService {
         }
 
         Map<Long, List<Stop>> byDriver = new LinkedHashMap<>();
+        Map<Long, GeocodeResult> endByDriverId = new LinkedHashMap<>();
         for (Driver driver : drivers) {
             byDriver.put(driver.getId(), new ArrayList<>());
+            endByDriverId.put(driver.getId(), endPointOf(driver));
         }
-        List<Stop> unpinned = new ArrayList<>();
-        for (Stop stop : geocodable) {
+        // Pass 1: every deadline stop (pinned or not) is placed in global ascending-deadline
+        // order — appending each to its driver's route-so-far is always deadline-valid, since
+        // every deadline stop already placed anywhere has an equal-or-earlier deadline. A pinned
+        // one goes straight to its driver; an unpinned one goes wherever that append is cheapest.
+        List<Stop> deadlineStops = geocodable.stream()
+            .filter(s -> s.getDeadline() != null)
+            .sorted(Comparator.comparing(Stop::getDeadline))
+            .toList();
+        for (Stop stop : deadlineStops) {
             Long preferred = stop.getPreferredDriverId();
             if (preferred != null && byDriver.containsKey(preferred)) {
                 byDriver.get(preferred).add(stop);
-            } else {
-                unpinned.add(stop);
+                continue;
             }
-        }
-
-        double[] committedMinutes = new double[drivers.size()];
-        for (int i = 0; i < drivers.size(); i++) {
-            committedMinutes[i] = byDriver.get(drivers.get(i).getId()).stream()
-                .mapToDouble(this::onSiteMinutes).sum();
-        }
-
-        // Unpinned stops go one at a time to whichever driver is currently least loaded,
-        // so a driver who already has pinned stops doesn't get overloaded on top of them.
-        for (Stop stop : sweepByAngle(unpinned, depot)) {
-            int lightest = 0;
-            for (int i = 1; i < committedMinutes.length; i++) {
-                if (committedMinutes[i] < committedMinutes[lightest]) {
-                    lightest = i;
+            Long bestDriverId = null;
+            double bestCost = Double.MAX_VALUE;
+            for (Driver driver : drivers) {
+                List<Stop> current = byDriver.get(driver.getId());
+                double cost = insertionCost(current, current.size(), stop, travelTimes, endByDriverId.get(driver.getId()));
+                if (cost < bestCost) {
+                    bestCost = cost;
+                    bestDriverId = driver.getId();
                 }
             }
-            byDriver.get(drivers.get(lightest).getId()).add(stop);
-            committedMinutes[lightest] += onSiteMinutes(stop);
+            byDriver.get(bestDriverId).add(stop);
+        }
+
+        // Pass 2: pinned, non-deadline stops are inserted into their own driver's route wherever
+        // that costs the least extra driving — may land before, between or after the deadline
+        // stops placed in pass 1, since only the deadline stops' relative order is fixed.
+        List<Stop> unpinnedNonDeadline = new ArrayList<>();
+        for (Stop stop : geocodable) {
+            if (stop.getDeadline() != null) {
+                continue;
+            }
+            Long preferred = stop.getPreferredDriverId();
+            if (preferred == null || !byDriver.containsKey(preferred)) {
+                unpinnedNonDeadline.add(stop);
+                continue;
+            }
+            List<Stop> current = byDriver.get(preferred);
+            int bestPos = 0;
+            double bestCost = Double.MAX_VALUE;
+            for (int pos = 0; pos <= current.size(); pos++) {
+                double cost = insertionCost(current, pos, stop, travelTimes, endByDriverId.get(preferred));
+                if (cost < bestCost) {
+                    bestCost = cost;
+                    bestPos = pos;
+                }
+            }
+            current.add(bestPos, stop);
+        }
+
+        // Pass 3: unpinned, non-deadline stops — the ones that used to go by a rough per-stop
+        // time guess — now each go wherever (which driver, which position) is the real cheapest
+        // insertion, so a driver already carrying a far-flung cluster stops absorbing more of it
+        // just because its on-site-minutes tally looked lighter.
+        for (Stop stop : sweepByAngle(unpinnedNonDeadline, depot)) {
+            Long bestDriverId = null;
+            int bestPos = 0;
+            double bestCost = Double.MAX_VALUE;
+            for (Driver driver : drivers) {
+                List<Stop> current = byDriver.get(driver.getId());
+                GeocodeResult end = endByDriverId.get(driver.getId());
+                for (int pos = 0; pos <= current.size(); pos++) {
+                    double cost = insertionCost(current, pos, stop, travelTimes, end);
+                    if (cost < bestCost) {
+                        bestCost = cost;
+                        bestDriverId = driver.getId();
+                        bestPos = pos;
+                    }
+                }
+            }
+            byDriver.get(bestDriverId).add(bestPos, stop);
         }
 
         List<Route> routes = new ArrayList<>();
@@ -198,13 +255,12 @@ public class RouteGenerationService {
             if (stopsForDriver.isEmpty()) {
                 continue;
             }
-            List<Stop> ordered = orderStops(stopsForDriver, travelTimes);
             Route route = new Route();
             route.setRouteDate(today);
             route.setSequenceIndex(sequenceIndex++);
             route.setDriverId(driver.getId());
             route.setDriverName(driver.getName());
-            applyStops(route, ordered, driver, travelTimes, depotAddress);
+            applyStops(route, stopsForDriver, driver, travelTimes, depotAddress);
             routes.add(route);
         }
         reassignMisplacedStops(routes, drivers, travelTimes, depotAddress);
@@ -219,12 +275,12 @@ public class RouteGenerationService {
             if (bucket.isEmpty()) {
                 continue;
             }
-            List<Stop> ordered = orderStops(bucket, travelTimes);
+            Driver driver = drivers != null && i < drivers.size() ? drivers.get(i) : null;
+            List<Stop> ordered = orderStops(bucket, travelTimes, endPointOf(driver));
 
             Route route = new Route();
             route.setRouteDate(today);
             route.setSequenceIndex(i);
-            Driver driver = drivers != null && i < drivers.size() ? drivers.get(i) : null;
             if (driver != null) {
                 route.setDriverId(driver.getId());
                 route.setDriverName(driver.getName());
@@ -285,9 +341,9 @@ public class RouteGenerationService {
                         }
                         List<Stop> toStops = to.getStops();
                         GeocodeResult toEnd = endPointOf(driversById.get(to.getDriverId()));
-                        // Never insert ahead of "to"'s own deadline stops — they must stay first, in order.
-                        int deadlineCount = (int) toStops.stream().filter(s -> s.getDeadline() != null).count();
-                        for (int pos = deadlineCount; pos <= toStops.size(); pos++) {
+                        // candidate has no deadline (checked above), so it can land anywhere — inserting
+                        // it never reorders "to"'s own deadline stops relative to each other.
+                        for (int pos = 0; pos <= toStops.size(); pos++) {
                             double cost = insertionCost(toStops, pos, candidate, travelTimes, toEnd);
                             double savings = removalSavings - cost;
                             if (savings > bestSavings) {
@@ -388,27 +444,30 @@ public class RouteGenerationService {
         return buckets;
     }
 
-    /** Deadline stops first (earliest first), then a nearest-neighbour walk using real driving times. */
-    private List<Stop> orderStops(List<Stop> stops, TravelTimeMatrix travelTimes) {
-        List<Stop> withDeadline = stops.stream()
+    /**
+     * Deadline stops are placed in ascending-deadline order — the one thing this never reorders.
+     * Every other stop is then inserted wherever it causes the least extra driving (using the
+     * same real marginal-cost measure as {@link #reassignMisplacedStops}), which may land it
+     * before, between or after the deadline stops, not forced to come after all of them.
+     */
+    private List<Stop> orderStops(List<Stop> stops, TravelTimeMatrix travelTimes, GeocodeResult end) {
+        List<Stop> ordered = stops.stream()
             .filter(s -> s.getDeadline() != null)
             .sorted(Comparator.comparing(Stop::getDeadline))
-            .collect(Collectors.toList());
-        List<Stop> remaining = new ArrayList<>(stops.stream()
-            .filter(s -> s.getDeadline() == null)
-            .toList());
+            .collect(Collectors.toCollection(ArrayList::new));
+        List<Stop> remaining = stops.stream().filter(s -> s.getDeadline() == null).toList();
 
-        List<Stop> ordered = new ArrayList<>(withDeadline);
-        Stop current = ordered.isEmpty() ? null : ordered.get(ordered.size() - 1);
-
-        while (!remaining.isEmpty()) {
-            Stop from = current;
-            Stop nearest = remaining.stream()
-                .min(Comparator.comparingDouble(s -> from == null ? travelTimes.fromDepot(s) : travelTimes.between(from, s)))
-                .orElseThrow();
-            remaining.remove(nearest);
-            ordered.add(nearest);
-            current = nearest;
+        for (Stop stop : remaining) {
+            int bestPos = 0;
+            double bestCost = Double.MAX_VALUE;
+            for (int pos = 0; pos <= ordered.size(); pos++) {
+                double cost = insertionCost(ordered, pos, stop, travelTimes, end);
+                if (cost < bestCost) {
+                    bestCost = cost;
+                    bestPos = pos;
+                }
+            }
+            ordered.add(bestPos, stop);
         }
         return ordered;
     }
