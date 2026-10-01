@@ -52,10 +52,16 @@ public class RouteTextFormatter {
             sb.append('\n');
 
             sb.append("   Type: ").append(stop.getStopType() == StopType.GYM ? "Gym" : "Privat");
+            if (stop.getArrivalTime() != null) {
+                sb.append(" | Forventet ankomst: ").append(stop.getArrivalTime().format(TIME_FORMAT));
+            }
             if (stop.getDeadline() != null) {
                 sb.append(" | Deadline: ").append(stop.getDeadline().format(TIME_FORMAT));
             }
             sb.append('\n');
+            if (stop.getDeadline() != null && stop.getArrivalTime() != null && stop.getArrivalTime().isAfter(stop.getDeadline())) {
+                sb.append("   ⚠ OBS: Forventes IKKE at nå deadline kl. ").append(stop.getDeadline().format(TIME_FORMAT)).append('\n');
+            }
 
             String items = formatItems(quantitiesOf(stop));
             if (!items.isEmpty()) {

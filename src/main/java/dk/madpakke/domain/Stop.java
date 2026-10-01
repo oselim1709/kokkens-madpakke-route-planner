@@ -26,6 +26,11 @@ public class Stop {
     private boolean active = true;
     private String createdAt;
 
+    // Not persisted — filled in when a route is built/read, from the route's start time plus
+    // real driving/on-site time up to this stop, so the UI can show an expected clock time and
+    // flag a deadline that won't be met. Null when no start time is set.
+    private LocalTime arrivalTime;
+
     public boolean isGeocoded() {
         return lat != null && lon != null;
     }
@@ -180,5 +185,13 @@ public class Stop {
 
     public void setCreatedAt(String createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public LocalTime getArrivalTime() {
+        return arrivalTime;
+    }
+
+    public void setArrivalTime(LocalTime arrivalTime) {
+        this.arrivalTime = arrivalTime;
     }
 }

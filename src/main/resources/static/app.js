@@ -565,9 +565,13 @@ window.deleteDriver = async function (id) {
 // ---------- Routes ----------
 
 async function loadRoutes() {
-    const [drivers, routes] = await Promise.all([api("/api/drivers"), api("/api/routes/today")]);
+    const [drivers, routes, settings] = await Promise.all([api("/api/drivers"), api("/api/routes/today"), api("/api/settings")]);
     state.drivers = drivers;
     state.routes = routes;
+    const startInput = document.getElementById("route-start-time");
+    if (settings.routeStartTime && !startInput.value) {
+        startInput.value = settings.routeStartTime.substring(0, 5);
+    }
     renderRoutes([]);
 }
 
@@ -576,7 +580,8 @@ document.getElementById("btn-generate").addEventListener("click", async () => {
     btn.disabled = true;
     btn.textContent = "Genererer…";
     try {
-        const result = await api("/api/routes/generate", { method: "POST" });
+        const startTime = document.getElementById("route-start-time").value || null;
+        const result = await api("/api/routes/generate", { method: "POST", body: JSON.stringify({ startTime }) });
         state.routes = result.routes;
         renderRoutes(result.skippedStops || []);
         showToast("Ruter genereret");
@@ -636,6 +641,8 @@ function renderRoutes(skippedStops) {
                 ? `<span class="badge gym">Gym</span>`
                 : `<span class="badge private">Privat</span>`;
             const deadline = stop.deadline ? ` · Deadline ${stop.deadline.substring(0, 5)}` : "";
+            const arrival = stop.arrivalTime ? ` · Forventet ankomst ${stop.arrivalTime.substring(0, 5)}` : "";
+            const missesDeadline = stop.deadline && stop.arrivalTime && stop.arrivalTime > stop.deadline;
             return `
                 <div class="route-stop" data-stop-id="${stop.id}">
                     <div class="drag-handle" title="Træk for at flytte stoppet">⠿</div>
@@ -644,7 +651,8 @@ function renderRoutes(skippedStops) {
                             <strong class="stop-order">${i + 1}. ${esc(stop.customerName)}</strong>
                             ${typeBadge}
                         </div>
-                        <div class="muted">${esc(stop.address)}${stop.floorDoor ? ` · <strong>Etage/dør: ${esc(stop.floorDoor)}</strong>` : ""}${deadline}</div>
+                        <div class="muted">${esc(stop.address)}${stop.floorDoor ? ` · <strong>Etage/dør: ${esc(stop.floorDoor)}</strong>` : ""}${arrival}${deadline}</div>
+                        ${missesDeadline ? `<div class="pack-summary" style="background:#fde8df; color:#a44d1e;">⚠ Når muligvis ikke deadline kl. ${esc(stop.deadline.substring(0, 5))} — træk stoppet tidligere i ruten</div>` : ""}
                         ${items ? `<div class="items">${esc(items)}</div>` : ""}
                         ${stop.specialOrder ? `<div class="muted items">Special: ${esc(stop.specialOrder)}</div>` : ""}
                     </div>

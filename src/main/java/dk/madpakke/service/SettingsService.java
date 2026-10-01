@@ -1,6 +1,8 @@
 package dk.madpakke.service;
 
 import dk.madpakke.repository.SettingsRepository;
+import java.time.LocalTime;
+import java.util.Optional;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -14,6 +16,7 @@ public class SettingsService {
     private static final String KEY_DEPOT_ADDRESS = "depot_address";
     private static final String KEY_DEPOT_LAT = "depot_lat";
     private static final String KEY_DEPOT_LON = "depot_lon";
+    private static final String KEY_ROUTE_START_TIME = "route_start_time";
 
     private final SettingsRepository settingsRepository;
     private final GeocodingService geocodingService;
@@ -62,5 +65,23 @@ public class SettingsService {
 
     public boolean hasDepotCoordinates() {
         return settingsRepository.get(KEY_DEPOT_LAT).isPresent() && settingsRepository.get(KEY_DEPOT_LON).isPresent();
+    }
+
+    /**
+     * When the driver(s) actually leave the depot, e.g. "08:00". Used to show an expected
+     * clock time at each stop and flag a deadline that won't be met — it no longer controls
+     * stop order (routes are built for efficiency regardless of deadlines). Remembered between
+     * days so it's pre-filled, not re-entered every time.
+     */
+    public Optional<LocalTime> getRouteStartTime() {
+        return settingsRepository.get(KEY_ROUTE_START_TIME).map(LocalTime::parse);
+    }
+
+    public void setRouteStartTime(LocalTime startTime) {
+        if (startTime == null) {
+            settingsRepository.delete(KEY_ROUTE_START_TIME);
+            return;
+        }
+        settingsRepository.set(KEY_ROUTE_START_TIME, startTime.toString());
     }
 }

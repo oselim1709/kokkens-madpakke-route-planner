@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Kokkens Madpakke Route Planner</title>
-<link rel="stylesheet" href="style.css?v=21">
+<link rel="stylesheet" href="style.css?v=23">
 </head>
 <body>
 
@@ -52,7 +52,13 @@
     <section class="tab" id="tab-routes">
         <div class="section-title">
             <h2>Ruter i dag</h2>
-            <button class="btn small" id="btn-generate">Generér ruter</button>
+        </div>
+        <div class="card">
+            <label class="muted" for="route-start-time">Starttid (valgfri) — med en starttid bygges ruterne efter det mest effektive, og du kan se forventet ankomsttid pr. stop + advarsel ved en deadline, der ikke nås. Uden starttid holdes deadline-stops i den rigtige rækkefølge som en sikkerhed, da vi ellers ikke kan tjekke dem.</label>
+            <div class="driver-row" style="margin-top:6px;">
+                <input type="time" id="route-start-time">
+                <button class="btn small" id="btn-generate">Generér ruter</button>
+            </div>
         </div>
         <div id="route-warnings"></div>
         <div id="route-list"></div>
@@ -276,6 +282,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
-<script src="app.js?v=21"></script>
+<script src="app.js?v=23"></script>
 </body>
 </html>

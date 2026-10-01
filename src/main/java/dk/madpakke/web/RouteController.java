@@ -63,8 +63,16 @@ public class RouteController {
         }
     }
 
+    /** @param startTime "HH:mm", when the drivers leave the depot today — used only to show an
+     *  expected arrival clock time per stop, never to decide stop order. Omit to leave it as
+     *  last set (Indstillinger remembers it between days); pass "" to clear it. */
     @PostMapping("/generate")
-    public ResponseEntity<?> generate() {
+    public ResponseEntity<?> generate(@RequestBody(required = false) Map<String, Object> body) {
+        if (body != null && body.containsKey("startTime")) {
+            Object raw = body.get("startTime");
+            settingsService.setRouteStartTime(raw == null || raw.toString().isBlank()
+                ? null : java.time.LocalTime.parse(raw.toString()));
+        }
         try {
             RouteGenerationResult result = routeGenerationService.generate();
             return ResponseEntity.ok(Map.of(
@@ -80,6 +88,7 @@ public class RouteController {
     public List<Route> today() {
         List<Route> routes = routeRepository.findByDate(LocalDate.now().toString());
         routes.forEach(this::attachMapUrl);
+        routeGenerationService.attachArrivalTimes(routes);
         return routes;
     }
 
@@ -145,6 +154,7 @@ public class RouteController {
         return routeRepository.findById(id)
             .map(route -> {
                 attachMapUrl(route);
+                routeGenerationService.attachArrivalTimes(List.of(route));
                 return ResponseEntity.ok(routeTextFormatter.format(route));
             })
             .orElse(ResponseEntity.notFound().build());

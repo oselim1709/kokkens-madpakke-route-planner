@@ -26,4 +26,8 @@ public class SettingsRepository {
             jdbc.update("INSERT INTO settings (key, value) VALUES (?, ?)", key, value);
         }
     }
+
+    public void delete(String key) {
+        jdbc.update("DELETE FROM settings WHERE key = ?", key);
+    }
 }
