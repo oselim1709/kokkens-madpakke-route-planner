@@ -8,6 +8,7 @@ import dk.madpakke.repository.DriverRepository;
 import dk.madpakke.repository.RouteRepository;
 import dk.madpakke.repository.StopRepository;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -72,6 +73,9 @@ public class RouteGenerationService {
     // what it adds to the other) before it's worth relocating a stop for. Keeps the pass from
     // shuffling stops back and forth over a one- or two-minute difference.
     private static final double MIN_REASSIGN_SAVINGS_MINUTES = 5;
+    // Buffer kept before a deadline (traffic, a small delay, anything can happen) — arriving
+    // with less than this much margin left is flagged, not just literally arriving too late.
+    private static final int DEADLINE_SAFETY_MARGIN_MINUTES = 10;
 
     private final StopRepository stopRepository;
     private final DriverRepository driverRepository;
@@ -172,7 +176,13 @@ public class RouteGenerationService {
                 Stop previous = null;
                 for (Stop stop : route.getStops()) {
                     minutes += previous == null ? travelTimes.fromDepot(stop) : travelTimes.between(previous, stop);
-                    stop.setArrivalTime(startTime.plusMinutes(Math.round(minutes)));
+                    LocalTime arrival = startTime.plusMinutes(Math.round(minutes));
+                    stop.setArrivalTime(arrival);
+                    // Flagged once there's less than the safety margin of buffer left before the
+                    // deadline (or it's already gone) — a small delay or traffic shouldn't be able
+                    // to turn an "on time" estimate into a missed deadline with no warning.
+                    stop.setDeadlineAtRisk(stop.getDeadline() != null
+                        && !arrival.isBefore(stop.getDeadline().minusMinutes(DEADLINE_SAFETY_MARGIN_MINUTES)));
                     minutes += onSiteMinutes(stop);
                     previous = stop;
                 }

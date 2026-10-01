@@ -642,7 +642,7 @@ function renderRoutes(skippedStops) {
                 : `<span class="badge private">Privat</span>`;
             const deadline = stop.deadline ? ` · Deadline ${stop.deadline.substring(0, 5)}` : "";
             const arrival = stop.arrivalTime ? ` · Forventet ankomst ${stop.arrivalTime.substring(0, 5)}` : "";
-            const missesDeadline = stop.deadline && stop.arrivalTime && stop.arrivalTime > stop.deadline;
+            const missesDeadline = stop.deadlineAtRisk;
             return `
                 <div class="route-stop" data-stop-id="${stop.id}">
                     <div class="drag-handle" title="Træk for at flytte stoppet">⠿</div>
@@ -652,7 +652,7 @@ function renderRoutes(skippedStops) {
                             ${typeBadge}
                         </div>
                         <div class="muted">${esc(stop.address)}${stop.floorDoor ? ` · <strong>Etage/dør: ${esc(stop.floorDoor)}</strong>` : ""}${arrival}${deadline}</div>
-                        ${missesDeadline ? `<div class="pack-summary" style="background:#fde8df; color:#a44d1e;">⚠ Når muligvis ikke deadline kl. ${esc(stop.deadline.substring(0, 5))} — træk stoppet tidligere i ruten</div>` : ""}
+                        ${missesDeadline ? `<div class="pack-summary" style="background:#fde8df; color:#a44d1e;">⚠ For tæt på deadline kl. ${esc(stop.deadline.substring(0, 5))} (ingen margen til forsinkelser) — træk stoppet tidligere i ruten</div>` : ""}
                         ${items ? `<div class="items">${esc(items)}</div>` : ""}
                         ${stop.specialOrder ? `<div class="muted items">Special: ${esc(stop.specialOrder)}</div>` : ""}
                     </div>

@@ -31,6 +31,11 @@ public class Stop {
     // flag a deadline that won't be met. Null when no start time is set.
     private LocalTime arrivalTime;
 
+    // Not persisted — true when arrivalTime leaves less than a safety margin before the
+    // deadline (or is already past it), so a delay from traffic or a small error wouldn't blow
+    // it. Always false when there's no deadline or no arrivalTime.
+    private boolean deadlineAtRisk;
+
     public boolean isGeocoded() {
         return lat != null && lon != null;
     }
@@ -193,5 +198,13 @@ public class Stop {
 
     public void setArrivalTime(LocalTime arrivalTime) {
         this.arrivalTime = arrivalTime;
+    }
+
+    public boolean isDeadlineAtRisk() {
+        return deadlineAtRisk;
+    }
+
+    public void setDeadlineAtRisk(boolean deadlineAtRisk) {
+        this.deadlineAtRisk = deadlineAtRisk;
     }
 }

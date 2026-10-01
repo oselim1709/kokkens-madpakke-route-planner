@@ -59,8 +59,9 @@ public class RouteTextFormatter {
                 sb.append(" | Deadline: ").append(stop.getDeadline().format(TIME_FORMAT));
             }
             sb.append('\n');
-            if (stop.getDeadline() != null && stop.getArrivalTime() != null && stop.getArrivalTime().isAfter(stop.getDeadline())) {
-                sb.append("   ⚠ OBS: Forventes IKKE at nå deadline kl. ").append(stop.getDeadline().format(TIME_FORMAT)).append('\n');
+            if (stop.isDeadlineAtRisk()) {
+                sb.append("   ⚠ OBS: For tæt på deadline kl. ").append(stop.getDeadline().format(TIME_FORMAT))
+                    .append(" — ingen margen til forsinkelser\n");
             }
 
             String items = formatItems(quantitiesOf(stop));
